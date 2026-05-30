@@ -1,12 +1,12 @@
 from pydantic import BaseModel, ConfigDict
 
 
-class ProductRead(BaseModel):
+class SupplierRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    sku: str
+    code: str
     name: str
-    category: str
-    unit_of_measure: str
+    default_lead_time_days: int
+    rating: float
     is_active: bool

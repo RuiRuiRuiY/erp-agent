@@ -13,11 +13,11 @@
 ```text
 mock-erp/
 ├── app/
-│   ├── main.py               
-│   ├── core/                 
-│   │   ├── config.py         
-│   │   ├── database.py       
-│   │   └── exceptions.py     
+│   ├── main.py           
+│   ├── core/             
+│   │   ├── config.py     
+│   │   ├── database.py   
+│   │   └── exceptions.py   
 │   │
 │   ├── model/                  # 🌟 ORM 模型 (严格 1:1 映射 DDL 表名，绝不乱造词)
 │   │   ├── __init__.py         # 统一导出所有模型，方便 Alembic 或 create_all 使用
@@ -43,7 +43,7 @@ mock-erp/
 │   ├── api/                    # 🌟 路由层 (RESTful 端点)
 │   │   ├── deps.py             # 依赖注入 (get_db)
 │   │   └── v1/
-│   │       ├── router.py     
+│   │       ├── router.py   
 │   │       ├── product.py      # GET /products
 │   │       ├── department.py   # GET /departments
 │   │       ├── pricing.py      # POST /pricing/simulate
@@ -67,8 +67,8 @@ mock-erp/
 │   │   └── budget.py           # 预算原子性读写 (供 purchase_order 调用)
 │   │
 │   └── agent/                  # 智能体专属层
-│       ├── tools.py          
-│       └── prompts.py        
+│       ├── tools.py      
+│       └── prompts.py    
 ```
 
 #### 2. 统一异常处理：补充“HTTP 状态码规范”与“Agent 建议字段”
@@ -132,28 +132,70 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
 
 - **🏆 里程碑 1**：运行 seed 脚本，本地生成完美的 `mock_erp.db`，且外键约束和 Check 约束在 SQLite 中真实生效。
 
-#### 🚩 Sprint 2: 核心 API 与业务逻辑 (预计耗时: 40%)
+#### 🚩 Sprint 2: 核心 API 与业务逻辑 – 垂直切片 (预计耗时: 40%)
 
-**目标：实现 ERP 的核心后端能力，提供标准 RESTful API。**
+**目标：按业务领域垂直切片，每个 Task 交付完整的 "schema + repository + service + API"。**
 
-- [ ] **Task 2.1**: 实现 `repository/` 下各实体的数据访问层，以及 `schema/` 下各实体的 Pydantic 模型。
-- [ ] **Task 2.2**: **攻坚** `POST /api/v1/pricing/simulate` (试算引擎)，实现多供应商阶梯比价算法。
-- [ ] **Task 2.3**: 实现 `POST /api/v1/po` (创建采购单)，确保价格由后端计算并固化快照。
-- [ ] **Task 2.4**: **攻坚** `POST /api/v1/po/{id}/transit` (状态机流转)，实现 Guard (预算/库存校验) 和 Action (预算冻结/扣减 + 库存锁定/消耗)。
-- [ ] **Task 2.5**: 为核心算法（试算、状态机）编写 `pytest` 单元测试。
+**Phase A: 只读查询 (Read APIs) — 快速出成果**
 
-- **🏆 里程碑 2**：启动 FastAPI (`uvicorn`)，能通过 Swagger UI 手动调用 API，完成一次完整的“比价 -> 建单 -> 提审 -> 扣预算”流程。
+- [X] **Task 2.1**: 商品与供应商目录 API
 
-#### 🚩 Sprint 3: Agent 工具封装与集成 (预计耗时: 25%)
+  - `schema/product.py`, `schema/supplier.py`
+  - `repository/product.py`, `repository/supplier.py`, `repository/supplier_pricelist.py`
+  - `api/v1/product.py` (GET /products), `api/v1/supplier.py` (GET /suppliers)
+  - 测试: 目录查询
+- [X] **Task 2.2**: 部门与预算 API
 
-**目标：让大模型“长出手脚”，接管系统。**
+  - `schema/department.py`, `schema/budget.py`
+  - `repository/department.py`, `repository/budget.py`
+  - `api/v1/department.py` (GET /departments), `api/v1/budget.py` (GET /budgets/{dept_id})
+  - 测试: 预算查询
+- [ ] **Task 2.3**: 库存 API
 
-- [ ] **Task 3.1**: 在 `app/agent/tools.py` 中，使用 LangChain 的 `@tool` 装饰器，将 Sprint 2 的核心 API 封装为 Agent Tools。
-- [ ] **Task 3.2**: 编写极其详细的 Tool Docstring（大模型全靠这个理解工具怎么用）。
-- [ ] **Task 3.3**: 在 `app/agent/prompts.py` 中编写 System Prompt，赋予 Agent “专业采购助理”的人设，并规定其遇到“预算不足”时的思考链路 (Chain of Thought)。
-- [ ] **Task 3.4**: 编写一个简易的 CLI 交互脚本 (`run_agent.py`)，接入大模型 API (如 OpenAI/智谱/通义)。
+  - `schema/inventory.py`
+  - `repository/inventory.py` (+ 原子更新辅助方法)
+  - `api/v1/inventory.py` (GET /inventory/{product_id})
+  - 测试: 库存查询
 
-- **🏆 里程碑 3**：在终端里通过自然语言对 Agent 说：“*研发部急需 5 台高配显示器，帮我走一下采购流程。*” Agent 能自动调用工具并返回结果。
+- **🏆 里程碑 2A**：启动 FastAPI (`uvicorn`)，所有只读 API 可通过 Swagger UI 调用。
+
+**Phase B: 核心交易 (Write APIs)**
+
+- [ ] **Task 2.4**: **攻坚** 价格试算引擎 🌟
+
+  - `schema/pricing.py` (SimulateRequest/Response)
+  - `service/pricing.py` (多供应商阶梯比价算法)
+  - `api/v1/pricing.py` (POST /pricing/simulate)
+  - 测试: 阶梯匹配 + 推荐逻辑 (含陷阱数据验证)
+- [ ] **Task 2.5**: 采购单创建
+
+  - `schema/purchase_order.py` (create 部分)
+  - `repository/purchase_order.py` (主子表持久化)
+  - `service/purchase_order.py` (创建逻辑，含后端定价固化快照)
+  - `api/v1/purchase_order.py` (POST /po)
+  - 测试: PO 创建
+- [ ] **Task 2.6**: **攻坚** 状态机流转 — 预算+库存联动 🌟
+
+  - `schema/purchase_order.py` (transit 部分)
+  - `service/purchase_order.py` (transit 编排 + guard/action)
+  - `repository/budget.py` (冻结合并操作), `repository/inventory.py` (锁定操作)
+  - `api/v1/purchase_order.py` (POST /po/{id}/transit)
+  - 测试: 完整 Happy Path + 各种边界（预算不足、库存不够、非法跃迁）
+
+- **🏆 里程碑 2B**：完成完整的"比价 → 建单 → 提审 → 扣预算"全流程。
+
+#### 🚩 Sprint 3: Agent 工具集成与 LLM 验证 (预计耗时: 25%)
+
+**目标：通过 OpenAI-compatible Function Calling 让大模型接管系统，纯 OpenAPI schema，无需 LangChain。**
+
+- [ ] **Task 3.1**: 配置 LLM 客户端 (`app/agent/client.py`)，支持 OpenAI-compatible API
+- [ ] **Task 3.2**: 实现 Function Calling 适配层 (`app/agent/tools.py`)
+  - 将 FastAPI OpenAPI 端点映射为 LLM 工具描述
+  - 在 system prompt 中注入工具定义
+- [ ] **Task 3.3**: 编写 System Prompt (`app/agent/prompts.py`)，赋予 Agent "专业采购助理"人设，规定其遇到"预算不足"时的思考链路 (Chain of Thought)
+- [ ] **Task 3.4**: 编写 CLI 交互脚本 (`scripts/run_agent.py`)，接入大模型 API
+
+- **🏆 里程碑 3**：在终端里通过自然语言对 Agent 说："*研发部急需 5 台高配显示器，帮我走一下采购流程。*" Agent 能自动调用工具并返回结果。
 
 #### 🚩 Sprint 4: 端到端测试、容器化与演示准备 (预计耗时: 15%)
 
