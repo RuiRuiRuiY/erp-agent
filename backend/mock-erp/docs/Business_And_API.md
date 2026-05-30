@@ -162,13 +162,13 @@ def simulate_pricing_logic(items: List[SimulateRequestItem]):
 # 定义状态机规则
 STATE_MACHINE = {
     'DRAFT': {
-        'PENDING': {'guard': 'check_budget', 'action': 'freeze_budget'},
-        'CANCELLED': {'action': None}
+        'PENDING': {'guard': 'check_budget_and_stock', 'action': 'freeze_budget_and_lock_stock'},
+        'CANCELLED': {'action': 'unlock_stock'}
     },
     'PENDING': {
-        'APPROVED': {'guard': 'is_finance_role', 'action': 'deduct_budget'}, # 审批通过，冻结转为实际扣减
-        'REJECTED': {'guard': 'is_finance_role', 'action': 'unfreeze_budget'}, # 驳回，释放冻结预算
-        'CANCELLED': {'action': 'unfreeze_budget'}
+        'APPROVED': {'guard': 'is_finance_role', 'action': 'deduct_budget_and_consume_stock'}, # 审批通过，冻结转为实际扣减，库存正式出库
+        'REJECTED': {'guard': 'is_finance_role', 'action': 'unfreeze_budget_and_unlock_stock'}, # 驳回，释放冻结预算和库存
+        'CANCELLED': {'action': 'unfreeze_budget_and_unlock_stock'}
     },
     'REJECTED': {'DRAFT': {'action': None}}, # 驳回后退回草稿修改
     # ... 其他状态
@@ -186,26 +186,38 @@ def transit_po_logic(po_id: UUID, target_status: str, operator_role: str):
     
     # 2. 执行前置校验 (Guard)
     if 'guard' in transition_rule:
-        if transition_rule['guard'] == 'check_budget':
+        if transition_rule['guard'] == 'check_budget_and_stock':
             budget = get_budget(po.department_id)
-            if budget.remaining < po.total_amount:
-                # 🌟 抛出结构化错误，让 Agent 明确知道原因
+            inventory = get_inventory(po.product_id)
+            if budget.available < po.total_amount:
                 raise BudgetInsufficientError(
                     required=po.total_amount, 
-                    remaining=budget.remaining,
+                    remaining=budget.available,
                     suggestion="请减少采购数量或申请追加预算"
+                )
+            if inventory.available_qty < po.total_qty:
+                raise InsufficientStockError(
+                    product_id=po.product_id,
+                    available=inventory.available_qty,
+                    requested=po.total_qty,
                 )
         elif transition_rule['guard'] == 'is_finance_role' and operator_role != 'finance_manager':
             raise PermissionDeniedError("审批操作需要财务经理权限")
             
-    # 3. 执行副作用 (Action) - 涉及预算变动
+    # 3. 执行副作用 (Action) - 涉及预算和库存变动
     if 'action' in transition_rule:
-        if transition_rule['action'] == 'freeze_budget':
+        action = transition_rule['action']
+        if action == 'freeze_budget_and_lock_stock':
             freeze_budget(po.department_id, po.total_amount)
-        elif transition_rule['action'] == 'unfreeze_budget':
+            lock_stock(po.product_id, po.total_qty)
+        elif action == 'unfreeze_budget_and_unlock_stock':
             unfreeze_budget(po.department_id, po.total_amount)
-        elif transition_rule['action'] == 'deduct_budget':
+            unlock_stock(po.product_id, po.total_qty)
+        elif action == 'deduct_budget_and_consume_stock':
             deduct_budget(po.department_id, po.total_amount)
+            consume_stock(po.product_id, po.total_qty)
+        elif action == 'unlock_stock':
+            unlock_stock(po.product_id, po.total_qty)
             
     # 4. 更新状态并保存
     po.status = target_status

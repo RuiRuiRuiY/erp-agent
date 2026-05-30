@@ -9,13 +9,13 @@
 
 ## 2. 核心实体定义 (Data Dictionary)
 
-系统包含四个核心数据实体，它们之间存在严格的关联约束：
+系统包含**五个**核心数据实体，它们之间存在严格的关联约束：
 
 | 实体名称                   | 核心字段 (简略)                                              | 业务含义与约束                                               |
 | -------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | **Product (商品)**         | `id` (UUID), `name`, `category`, `unit_price`                | 硬件商品基础信息。不可被 Agent 修改或创建。                  |
-| **Inventory (库存)**       | `product_id` (FK), `total_qty`, `available_qty`, `locked_qty` | `available_qty` = `total_qty` - `locked_qty`。Agent 采购时只能使用 `available_qty`。 |
-| **Budget (预算)**          | `department_id` (主键), `total_limit`, `used_amount`         | 部门的财务预算。`remaining` = `total_limit` - `used_amount`。 |
+| **Inventory (库存)**       | `product_id` (FK), `total_qty`, `locked_qty`                 | `available_qty` = `total_qty` - `locked_qty`。Agent 采购时只能使用 `available_qty`。 |
+| **Budget (预算)**          | `department_id` (主键), `total_budget`, `used_budget`, `frozen_budget` | 部门财务预算。`available` = `total - used - frozen`。`frozen_budget` 记录已冻结但未审批的金额。 |
 | **PurchaseOrder (采购单)** | `id` (UUID), `product_id`, `dept_id`, `qty`, `total_cost`, `status` | 核心业务单据。记录采购行为及当前流转状态。                   |
 
 | 实体名称          | 核心字段 (简略)                                             | 业务含义与约束                           |
@@ -153,8 +153,9 @@
 
 ### 5.3 事务一致性约束 (Transaction)
 
-- **创建订单时**：必须在同一个数据库事务中完成：① 生成订单记录 -> ② 增加 `locked_qty` -> ③ 减少 `available_qty`。任何一步失败，全部回滚。
-- **批准订单时**：必须在同一个事务中完成：① 状态改为 `APPROVED` -> ② 扣减部门 `used_amount` (实际扣钱) -> ③ 减少 `locked_qty` (库存真正出库)。
+- **创建订单时**：必须在同一个数据库事务中完成：① 生成订单记录 -> ② 锁定库存（`locked_qty += qty`, `available_qty -= qty`）。任何一步失败，全部回滚。
+- **提交审批时**：必须在同一个事务中完成：① 状态改为 `PENDING_APPROVAL` -> ② 冻结部门预算（`frozen_budget += amount`）-> ③ 同时锁定库存已在创建时完成，此时保持锁定。
+- **批准订单时**：必须在同一个事务中完成：① 状态改为 `APPROVED` -> ② 扣减部门预算（`used_budget += amount`, `frozen_budget -= amount`）-> ③ 消耗库存（`locked_qty -= qty`, `total_qty -= qty`）。
 
 ## 6. 验收标准 (Acceptance Criteria for Agent)
 

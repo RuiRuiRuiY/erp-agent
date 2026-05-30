@@ -20,3 +20,4 @@ class Budget(Base, table=True):
     fiscal_year: int
     total_budget: int
     used_budget: int = Field(default=0)
+    frozen_budget: int = Field(default=0, ge=0)

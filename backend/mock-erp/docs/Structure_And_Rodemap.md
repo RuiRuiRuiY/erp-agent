@@ -2,7 +2,7 @@
 
 为了让这个项目从“优秀的标准 Web 项目”彻底蜕变为 **“优秀的 Agent-Native (面向智能体) 企业级 PoC 项目”**，我建议在工程准备上做以下 **4 点关键补充与微调**，并在最后为你提供一份清晰的**开发 Roadmap**。
 
-------
+---
 
 ### 一、 对“工程准备”的补充与修改建议
 
@@ -13,11 +13,11 @@
 ```text
 mock-erp/
 ├── app/
-│   ├── main.py                 
-│   ├── core/                   
-│   │   ├── config.py           
-│   │   ├── database.py         
-│   │   └── exceptions.py       
+│   ├── main.py               
+│   ├── core/                 
+│   │   ├── config.py         
+│   │   ├── database.py       
+│   │   └── exceptions.py     
 │   │
 │   ├── model/                  # 🌟 ORM 模型 (严格 1:1 映射 DDL 表名，绝不乱造词)
 │   │   ├── __init__.py         # 统一导出所有模型，方便 Alembic 或 create_all 使用
@@ -25,8 +25,9 @@ mock-erp/
 │   │   ├── product.py          # 对应 DDL: products
 │   │   ├── supplier.py         # 对应 DDL: suppliers
 │   │   ├── supplier_pricelist.py # 对应 DDL: supplier_pricelists (独立文件，因为它是核心定价引擎)
+│   │   ├── inventory.py        # 对应 DDL: inventory (库存锁定/释放)
 │   │   ├── department.py       # 对应 DDL: departments
-│   │   ├── budget.py           # 对应 DDL: budgets
+│   │   ├── budget.py           # 对应 DDL: budgets (含 frozen_budget)
 │   │   └── purchase_order.py   # 对应 DDL: purchase_orders & purchase_order_lines (主子表强绑定，放同一文件)
 │   │
 │   ├── schema/                 # 🌟 Pydantic 契约 (按业务动作和实体划分)
@@ -36,12 +37,13 @@ mock-erp/
 │   │   ├── department.py       # 部门查询出参 (Agent 需要知道有哪些部门)
 │   │   ├── pricing.py          # 核心：价格试算入参/出参 (SimulateRequest/Response)
 │   │   ├── purchase_order.py   # 核心：采购单创建/查询/状态流转 入参/出参
-│   │   └── budget.py           # 预算查询出参 (Agent 查余额)
+│   │   ├── inventory.py        # 库存查询出参 (Agent 查可用量)
+│   │   └── budget.py           # 预算查询出参 (Agent 查余额，含 frozen_budget)
 │   │
 │   ├── api/                    # 🌟 路由层 (RESTful 端点)
 │   │   ├── deps.py             # 依赖注入 (get_db)
 │   │   └── v1/
-│   │       ├── router.py       
+│   │       ├── router.py     
 │   │       ├── product.py      # GET /products
 │   │       ├── department.py   # GET /departments
 │   │       ├── pricing.py      # POST /pricing/simulate
@@ -53,19 +55,20 @@ mock-erp/
 │   │   ├── product.py          # 查商品
 │   │   ├── supplier.py         # 查供应商
 │   │   ├── supplier_pricelist.py # 查阶梯报价 (包含复杂 SQL)
+│   │   ├── inventory.py        # 库存的原子更新 (行级锁)
 │   │   ├── department.py       # 查部门
-│   │   ├── budget.py           # 预算的原子更新 (行级锁/乐观锁)
+│   │   ├── budget.py           # 预算的原子更新 (行级锁/乐观锁, 含 frozen_budget)
 │   │   └── purchase_order.py   # 采购单主子表的联合持久化
 │   │
 │   ├── service/                # 🌟 业务逻辑层 (聚焦核心交易与计算)
 │   │   ├── __init__.py
 │   │   ├── pricing.py          # 试算引擎 (比价算法)
-│   │   ├── purchase_order.py   # 采购单状态机流转 (编排预算操作)
+│   │   ├── purchase_order.py   # 采购单状态机流转 (编排预算 + 库存操作)
 │   │   └── budget.py           # 预算原子性读写 (供 purchase_order 调用)
 │   │
 │   └── agent/                  # 智能体专属层
-│       ├── tools.py            
-│       └── prompts.py          
+│       ├── tools.py          
+│       └── prompts.py        
 ```
 
 #### 2. 统一异常处理：补充“HTTP 状态码规范”与“Agent 建议字段”
@@ -103,6 +106,7 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
 - **陷阱 1 (价格 vs 交期)**：供应商 A 的显示器单价 1000 元，交期 15 天；供应商 B 的显示器单价 1200 元，交期 2 天。看 Agent 是否会根据 Prompt 中的“紧急程度”做出不同选择。
 - **陷阱 2 (预算红线)**：研发部本月预算只剩 5000 元，但 Agent 收到的指令是“买 10 把单价 600 元的人体工学椅”。测试 Agent 是否能触发“预算不足”异常，并**自主决定**将数量砍到 8 把，或者向人类发起审批请求。
 - **陷阱 3 (阶梯价诱惑)**：买 90 个鼠标单价 100 元，买 100 个鼠标单价 80 元。测试 Agent 是否会为了触发低价阶梯，主动建议人类“多买 10 个凑单反而更省钱”。
+- **陷阱 4 (库存不足)**：戴尔显示器可用库存仅 20 台，但 Agent 收到指令“买 50 台”。测试 Agent 能否捕获库存不足错误并主动提出替代方案。
 
 #### 4. 代码规范补充：加入 `pyright` 静态类型检查
 
@@ -110,7 +114,7 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
 
 - **建议**：在 `pre-commit` 中除了 `ruff`，务必加上 `pyright` (basedpyright)。在 README 中写上：“*本项目采用 Ruff + Pyright 进行严格的代码格式与静态类型检查，确保 Agent 工具契约的绝对严谨。*” 这会让面试官觉得你极其专业。
 
-------
+---
 
 ### 二、 项目开发 Roadmap (路线图)
 
@@ -120,50 +124,51 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
 
 **目标：搭好架子，跑通数据库，有数据可查。**
 
-- [x] **Task 1.1**: 初始化 `pyproject.toml` (配置 Ruff) 和 `.pre-commit-config.yaml`。
-- [x] **Task 1.2**: 编写 `app/core/database.py` (配置 SQLite，**关键：通过事件监听器激活 `PRAGMA foreign_keys = ON`**)。
-- [x] **Task 1.3**: 编写 `app/core/exceptions.py` (定义 `BusinessException` 及全局拦截器)。
-- [x] **Task 1.4**: **严格翻译 DDL**，编写 `app/model/` 下的 7 个模型文件，确保字段类型、约束（如 `CHECK(status IN ...)`）与 DDL 100% 一致。
-- [x] **Task 1.5**: 编写 `scripts/seed_db.py`，利用这些 Model 注入带有“业务陷阱”的种子数据。
+- [X] **Task 1.1**: 初始化 `pyproject.toml` (配置 Ruff) 和 `.pre-commit-config.yaml`。
+- [X] **Task 1.2**: 编写 `app/core/database.py` (配置 SQLite，**关键：通过事件监听器激活 `PRAGMA foreign_keys = ON`**)。
+- [X] **Task 1.3**: 编写 `app/core/exceptions.py` (定义 `BusinessException` 及全局拦截器)。
+- [X] **Task 1.4**: **严格翻译 DDL**，编写 `app/model/` 下的 8 个模型文件，确保字段类型、约束（如 `CHECK(status IN ...)`）与 DDL 100% 一致。
+- [X] **Task 1.5**: 编写 `scripts/seed_db.py`，利用这些 Model 注入带有“业务陷阱”的种子数据。
+
 - **🏆 里程碑 1**：运行 seed 脚本，本地生成完美的 `mock_erp.db`，且外键约束和 Check 约束在 SQLite 中真实生效。
 
 #### 🚩 Sprint 2: 核心 API 与业务逻辑 (预计耗时: 40%)
 
 **目标：实现 ERP 的核心后端能力，提供标准 RESTful API。**
 
-- [ ]  **Task 2.1**: 实现 `repository/` 下各实体的数据访问层，以及 `schema/` 下各实体的 Pydantic 模型。
-- [ ]  **Task 2.2**: **攻坚** `POST /api/v1/pricing/simulate` (试算引擎)，实现多供应商阶梯比价算法。
-- [ ]  **Task 2.3**: 实现 `POST /api/v1/po` (创建采购单)，确保价格由后端计算并固化快照。
-- [ ]  **Task 2.4**: **攻坚** `POST /api/v1/po/{id}/transit` (状态机流转)，实现 Guard (权限/预算校验) 和 Action (预算冻结/扣减)。
-- [ ]  **Task 2.5**: 为核心算法（试算、状态机）编写 `pytest` 单元测试。
+- [ ] **Task 2.1**: 实现 `repository/` 下各实体的数据访问层，以及 `schema/` 下各实体的 Pydantic 模型。
+- [ ] **Task 2.2**: **攻坚** `POST /api/v1/pricing/simulate` (试算引擎)，实现多供应商阶梯比价算法。
+- [ ] **Task 2.3**: 实现 `POST /api/v1/po` (创建采购单)，确保价格由后端计算并固化快照。
+- [ ] **Task 2.4**: **攻坚** `POST /api/v1/po/{id}/transit` (状态机流转)，实现 Guard (预算/库存校验) 和 Action (预算冻结/扣减 + 库存锁定/消耗)。
+- [ ] **Task 2.5**: 为核心算法（试算、状态机）编写 `pytest` 单元测试。
+
 - **🏆 里程碑 2**：启动 FastAPI (`uvicorn`)，能通过 Swagger UI 手动调用 API，完成一次完整的“比价 -> 建单 -> 提审 -> 扣预算”流程。
 
 #### 🚩 Sprint 3: Agent 工具封装与集成 (预计耗时: 25%)
 
 **目标：让大模型“长出手脚”，接管系统。**
 
-- [ ]  **Task 3.1**: 在 `app/agent/tools.py` 中，使用 LangChain 的 `@tool` 装饰器，将 Sprint 2 的核心 API 封装为 Agent Tools。
-- [ ]  **Task 3.2**: 编写极其详细的 Tool Docstring（大模型全靠这个理解工具怎么用）。
-- [ ]  **Task 3.3**: 在 `app/agent/prompts.py` 中编写 System Prompt，赋予 Agent “专业采购助理”的人设，并规定其遇到“预算不足”时的思考链路 (Chain of Thought)。
-- [ ]  **Task 3.4**: 编写一个简易的 CLI 交互脚本 (`run_agent.py`)，接入大模型 API (如 OpenAI/智谱/通义)。
+- [ ] **Task 3.1**: 在 `app/agent/tools.py` 中，使用 LangChain 的 `@tool` 装饰器，将 Sprint 2 的核心 API 封装为 Agent Tools。
+- [ ] **Task 3.2**: 编写极其详细的 Tool Docstring（大模型全靠这个理解工具怎么用）。
+- [ ] **Task 3.3**: 在 `app/agent/prompts.py` 中编写 System Prompt，赋予 Agent “专业采购助理”的人设，并规定其遇到“预算不足”时的思考链路 (Chain of Thought)。
+- [ ] **Task 3.4**: 编写一个简易的 CLI 交互脚本 (`run_agent.py`)，接入大模型 API (如 OpenAI/智谱/通义)。
+
 - **🏆 里程碑 3**：在终端里通过自然语言对 Agent 说：“*研发部急需 5 台高配显示器，帮我走一下采购流程。*” Agent 能自动调用工具并返回结果。
 
 #### 🚩 Sprint 4: 端到端测试、容器化与演示准备 (预计耗时: 15%)
 
 **目标：打包交付，准备“惊艳”面试官或评审委员。**
 
-- [ ]  **Task 4.1**: 编写 `Dockerfile` 和 `docker-compose.yml`，实现一键 `docker-compose up` 启动整个系统。
-
-- [ ]  **Task 4.2**: 完善 `README.md`，画出**系统架构图**和**状态机流转图**（用 Mermaid 语法）。
-
+- [ ] **Task 4.1**: 编写 `Dockerfile` 和 `docker-compose.yml`，实现一键 `docker-compose up` 启动整个系统。
+- [ ] **Task 4.2**: 完善 `README.md`，画出**系统架构图**和**状态机流转图**（用 Mermaid 语法）。
 - [ ] **Task 4.3**: 准备 3 个经典的 Demo 演示剧本（Script）：
+
 - *剧本 A (常规流程)*：Agent 完美比价并下单。
 - *剧本 B (预算拦截)*：Agent 遭遇预算不足，自主调整方案。
 - *剧本 C (防幻觉测试)*：人类故意诱导 Agent 买不存在的商品，Agent 严谨拒绝。
-  
 - **🏆 最终里程碑**：项目完全工程化，可随时在任意机器上拉起演示。
 
-------
+---
 
 ### 你的决定？
 

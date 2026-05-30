@@ -1,6 +1,7 @@
 from .base import Base
 from .budget import Budget
 from .department import Department
+from .inventory import Inventory
 from .product import Product
 from .purchase_order import PurchaseOrder, PurchaseOrderLine
 from .supplier import Supplier
@@ -13,6 +14,7 @@ __all__ = [
     "SupplierPricelist",
     "Department",
     "Budget",
+    "Inventory",
     "PurchaseOrder",
     "PurchaseOrderLine",
 ]

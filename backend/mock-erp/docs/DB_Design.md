@@ -37,8 +37,9 @@
 
 1. **Product (商品)** 与 **Supplier (供应商)** 是多对多关系。
 2. **SupplierPricelist (报价矩阵)** 是连接两者的关联表，并承载了**阶梯定价**和**时间有效性**的核心业务逻辑。
-3. **PurchaseOrder (采购单)** 属于某个 Department (部门)，并消耗其 Budget (预算)。
-4. **PurchaseOrderLine (采购明细)** 记录单次采购的具体商品、数量和**成交时的快照价格**。
+3. **Inventory (库存)** 维护每个商品的库存水位，`available_qty = total_qty - locked_qty` 用于 Agent 采购时的可用量校验。
+4. **PurchaseOrder (采购单)** 属于某个 Department (部门)，并消耗其 Budget (预算)。
+5. **PurchaseOrderLine (采购明细)** 记录单次采购的具体商品、数量和**成交时的快照价格**。
 
 ------
 
@@ -91,7 +92,18 @@ CREATE UNIQUE INDEX idx_supplier_product_qty
 ON supplier_pricelists(supplier_id, product_id, min_qty);
 
 -- ==========================================
--- 3. 财务与预算控制 (Finance & Budget)
+-- 3. 库存控制 (Inventory Control)
+-- ==========================================
+CREATE TABLE inventory (
+    id TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL UNIQUE,
+    total_qty INTEGER NOT NULL CHECK(total_qty >= 0),
+    locked_qty INTEGER DEFAULT 0 CHECK(locked_qty >= 0),
+    FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+-- ==========================================
+-- 4. 财务与预算控制 (Finance & Budget)
 -- ==========================================
 CREATE TABLE departments (
     id TEXT PRIMARY KEY,
@@ -106,13 +118,14 @@ CREATE TABLE budgets (
     -- 🌟 修正：金额改为 INTEGER，单位：分
     total_budget INTEGER NOT NULL CHECK(total_budget >= 0),
     used_budget INTEGER DEFAULT 0 CHECK(used_budget >= 0),
+    frozen_budget INTEGER DEFAULT 0 CHECK(frozen_budget >= 0),
     FOREIGN KEY (department_id) REFERENCES departments(id)
 );
 
 CREATE UNIQUE INDEX idx_dept_fiscal_year ON budgets(department_id, fiscal_year);
 
 -- ==========================================
--- 4. 交易与状态机 (Transactions & State Machine)
+-- 5. 交易与状态机 (Transactions & State Machine)
 -- ==========================================
 CREATE TABLE purchase_orders (
     id TEXT PRIMARY KEY,
@@ -172,7 +185,12 @@ CREATE INDEX idx_po_lines_po_id ON purchase_order_lines(po_id);
 
    - **设计**：`purchase_order_lines` 固化了 `unit_price`；`purchase_orders` 增加了 `agent_reasoning`。
 
-   - **收益**：前者保证了财务数据的不可篡改性（历史订单金额不随今日调价而改变）；后者为 AI 系统提供了宝贵的“可解释性”数据。当人类审计员问“AI 为什么选这家供应商”时，系统可以直接读取 `agent_reasoning` 字段进行回答。
+    - **收益**：前者保证了财务数据的不可篡改性（历史订单金额不随今日调价而改变）；后者为 AI 系统提供了宝贵的“可解释性”数据。当人类审计员问“AI 为什么选这家供应商”时，系统可以直接读取 `agent_reasoning` 字段进行回答。
+
+4. 预算与库存的对称锁定机制
+
+   - **设计**：`budgets` 表增加 `frozen_budget` 字段，新增 `inventory` 表记录 `locked_qty`。状态机流转时，预算冻结/扣减/释放与库存锁定/消耗/解锁严格对称执行。
+   - **收益**：Agent 在提交审批时，系统同时锁定预算和库存，确保资源不被重复分配。驳回或取消时同步释放，避免预算和库存状态不一致。这种"双重锁定"模式是真实 ERP 的核心财务逻辑。
 
    - 同时建议在应用层维护一个**状态机**来约束合法跳转：
 
@@ -192,24 +210,24 @@ CREATE INDEX idx_po_lines_po_id ON purchase_order_lines(po_id);
    - 为了更好地配合 Agent，建议在状态机中引入 **“副作用 (Side Effects)”** 和 **“角色权限 (Guards)”** 的概念：
 
      ```py
-     # 应用层状态机设计示例 (伪代码)
-     STATE_MACHINE = {
-         'DRAFT': {
-             'transitions': {
-                 'PENDING': {
-                     'guard': 'check_budget_freeze',  # 触发条件：必须能冻结预算
-                     'action': 'freeze_budget'        # 副作用：冻结部门预算
-                 },
-                 'CANCELLED': {'action': None}
-             }
-         },
-         'PENDING': {
-             'transitions': {
-                 'APPROVED': {'guard': 'is_finance_manager', 'action': 'confirm_budget_deduction'},
-                 'REJECTED': {'guard': 'is_finance_manager', 'action': 'unfreeze_budget'}, # 驳回必须释放预算
-                 'CANCELLED': {'action': 'unfreeze_budget'}
-             }
-         },
+      # 应用层状态机设计示例 (伪代码)
+      STATE_MACHINE = {
+          'DRAFT': {
+              'transitions': {
+                  'PENDING': {
+                      'guard': 'check_budget_and_stock',  # 触发条件：预算充足且库存足够
+                      'action': 'freeze_budget_and_lock_stock' # 副作用：冻结预算 + 锁定库存
+                  },
+                  'CANCELLED': {'action': None}
+              }
+          },
+          'PENDING': {
+              'transitions': {
+                  'APPROVED': {'guard': 'is_finance_manager', 'action': 'confirm_budget_deduction_and_consume_stock'},
+                  'REJECTED': {'guard': 'is_finance_manager', 'action': 'unfreeze_budget_and_unlock_stock'}, # 驳回必须释放预算和库存
+                  'CANCELLED': {'action': 'unfreeze_budget_and_unlock_stock'}
+              }
+          },
          # ... 其他状态
      }
      ```

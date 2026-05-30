@@ -8,6 +8,7 @@ from app.core.database import DB_PATH, engine, init_db
 from app.model import (
     Budget,
     Department,
+    Inventory,
     Product,
     Supplier,
     SupplierPricelist,
@@ -119,6 +120,7 @@ def seed() -> None:
             session.add(Budget(
                 department_id=dept_id, fiscal_year=2026,
                 total_budget=total, used_budget=used,
+                frozen_budget=0,
             ))
             print(f"    {note}")
         print("  budgets: 4")
@@ -150,6 +152,24 @@ def seed() -> None:
             )
         print(f"  pricelists: {len(pricelist_specs)}")
 
+        # -- inventory (need product_id) --
+        inventory_data = [
+            (product_map["LOGITECH_MOUSE"], 200, "罗技鼠标 库存充足"),
+            (product_map["DELL_MONITOR_27"], 5, "戴尔显示器 库存5台（充足）"),
+            (product_map["ERGO_CHAIR"], 5,
+             "人体工学椅 仅5把（库存陷阱：agent 若订10把将因库存不足被拒）"),
+            (product_map["MACBOOK_PRO_16"], 50, "MacBook Pro 50台"),
+            (product_map["SERVER_X10"], 45,
+             "服务器 45台（凑单陷阱增强：距50台折扣档差5台）"),
+            (product_map["MECH_KEYBOARD"], 100, "机械键盘 100台"),
+        ]
+        for prod_id, qty, note in inventory_data:
+            session.add(Inventory(
+                product_id=prod_id, total_qty=qty, locked_qty=0,
+            ))
+            print(f"    {note}")
+        print("  inventory: 6")
+
         session.commit()
         print(f"\n[OK] DB seeded: {DB_PATH}")
 
@@ -170,7 +190,12 @@ def seed() -> None:
    - 48台 x 10000 = 48万
    - 50台 x 9000 = 45万 -> 多买2台省3万
 
-4. [陷阱] 竞争报价: 机械键盘
+4. [陷阱] 库存不足: 人体工学椅（复合陷阱）
+   - 研发部预算仅剩 5000元，10把椅子需 6000元
+   - 即使预算够，库存也只有 5 把，10 把同样无法完成
+   - 需同时检查预算和库存两个维度
+
+5. [陷阱] 竞争报价: 机械键盘
    - SUP_C: 500元/个
    - SUP_A: 450元/个（更低价格）""")
 
