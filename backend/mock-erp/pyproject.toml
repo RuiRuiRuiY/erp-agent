@@ -1,0 +1,13 @@
+[project]
+name = "mock-erp"
+version = "0.1.0"
+description = "Mock ERP system for LLM Agent tool-calling evaluation"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi[standard]>=0.136.3",
+    "sqlmodel>=0.0.38",
+]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple"
+default = true

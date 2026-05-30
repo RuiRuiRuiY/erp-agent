@@ -1,0 +1,6 @@
+[project]
+name = "erp-agent"
+version = "0.1.0"
+description = "LLM Agent orchestration layer for Mock ERP"
+requires-python = ">=3.13"
+dependencies = []
