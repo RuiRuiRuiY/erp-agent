@@ -149,7 +149,7 @@
 ```
 
 - **非法操作示例**：Agent 试图调用 `update_order_status` 将 `DRAFT` 直接改为 `APPROVED`。
-- **API 预期返回**：`400 Bad Request`，错误码 `ERR_INVALID_STATE_TRANSITION`。
+- **API 预期返回**：`409 Conflict`，错误码 `ERR_INVALID_STATE_TRANSITION`。
 
 ### 5.3 事务一致性约束 (Transaction)
 
