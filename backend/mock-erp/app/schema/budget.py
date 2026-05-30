@@ -1,25 +1,27 @@
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
 
 class BudgetRead(BaseModel):
-    """Budget 查询出参，金额单位：元（从 DB 分自动转换）。"""
+    """Budget 查询出参，DB 存分（int），API 出元（float）。"""
+
+    model_config = ConfigDict(from_attributes=True)
 
     department_id: str
     fiscal_year: int
     total_budget: float
     used_budget: float
     frozen_budget: float
-    available: float
 
+    @computed_field
+    @property
+    def available(self) -> float:
+        return self.total_budget - self.used_budget - self.frozen_budget
+
+    @field_validator("total_budget", "used_budget", "frozen_budget", mode="before")
     @classmethod
-    def from_orm(cls, budget: "Budget") -> "BudgetRead":  # noqa: F821
-        return cls(
-            department_id=budget.department_id,
-            fiscal_year=budget.fiscal_year,
-            total_budget=budget.total_budget / 100.0,
-            used_budget=budget.used_budget / 100.0,
-            frozen_budget=budget.frozen_budget / 100.0,
-            available=(
-                budget.total_budget - budget.used_budget - budget.frozen_budget
-            ) / 100.0,
-        )
+    def fen_to_yuan(cls, v: Any) -> float:
+        if isinstance(v, int):
+            return v / 100.0
+        return float(v)

@@ -17,4 +17,4 @@ def get_budget(
     budget = get_budget_by_department_id(
         session, department_id, fiscal_year=fiscal_year,
     )
-    return BudgetRead.from_orm(budget)
+    return BudgetRead.model_validate(budget)

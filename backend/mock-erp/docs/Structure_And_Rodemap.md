@@ -13,9 +13,9 @@
 ```text
 mock-erp/
 ├── app/
-│   ├── main.py           
-│   ├── core/             
-│   │   ├── config.py     
+│   ├── main.py         
+│   ├── core/           
+│   │   ├── config.py   
 │   │   ├── database.py   
 │   │   └── exceptions.py   
 │   │
@@ -67,8 +67,8 @@ mock-erp/
 │   │   └── budget.py           # 预算原子性读写 (供 purchase_order 调用)
 │   │
 │   └── agent/                  # 智能体专属层
-│       ├── tools.py      
-│       └── prompts.py    
+│       ├── tools.py    
+│       └── prompts.py  
 ```
 
 #### 2. 统一异常处理：补充“HTTP 状态码规范”与“Agent 建议字段”
@@ -150,7 +150,7 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
   - `repository/department.py`, `repository/budget.py`
   - `api/v1/department.py` (GET /departments), `api/v1/budget.py` (GET /budgets/{dept_id})
   - 测试: 预算查询
-- [ ] **Task 2.3**: 库存 API
+- [X] **Task 2.3**: 库存 API
 
   - `schema/inventory.py`
   - `repository/inventory.py` (+ 原子更新辅助方法)
