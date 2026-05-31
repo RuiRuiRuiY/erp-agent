@@ -174,7 +174,7 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
   - `service/purchase_order.py` (创建逻辑，含后端定价固化快照)
   - `api/v1/purchase_order.py` (POST /po)
   - 测试: PO 创建
-- [ ] **Task 2.6**: **攻坚** 状态机流转 — 预算+库存联动 🌟
+- [X] **Task 2.6**: **攻坚** 状态机流转 — 预算+库存联动 🌟
 
   - `schema/purchase_order.py` (transit 部分)
   - `service/purchase_order.py` (transit 编排 + guard/action)

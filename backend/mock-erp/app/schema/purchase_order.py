@@ -35,3 +35,16 @@ class PORead(BaseModel):
     agent_reasoning: str | None
     created_at: str
     lines: list[POLineRead]
+
+
+class TransitStatusRequest(BaseModel):
+    target_status: str = Field(description="目标状态")
+    operator_role: str = Field(default="agent", description="操作者角色")
+
+
+class TransitStatusResponse(BaseModel):
+    po_id: str
+    po_number: str
+    old_status: str
+    new_status: str
+    budget_impact: str | None = None

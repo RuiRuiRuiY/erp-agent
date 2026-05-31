@@ -2,13 +2,15 @@ import pytest
 from app.core.exceptions import (
     BudgetInsufficientError,
     BusinessException,
+    InvalidStateTransitionError,
+    PermissionDeniedError,
     PricingTierNotFoundError,
     ResourceNotFoundError,
 )
 from app.repository.budget import get_budget_by_department_id
 from app.repository.inventory import get_inventory_by_product_id
 from app.schema.purchase_order import POCreateItem, POCreateRequest
-from app.service.purchase_order import create_purchase_order
+from app.service.purchase_order import create_purchase_order, transit_po
 
 
 class TestCreatePurchaseOrder:
@@ -134,3 +136,147 @@ class TestCreatePurchaseOrder:
         with pytest.raises(ResourceNotFoundError) as exc:
             create_purchase_order(session, req)
         assert exc.value.context["resource"] == "Product"
+
+
+class TestTransitPurchaseOrder:
+    """DRAFT 创建时已冻结合约——transit 只做重新校验和状态变更。"""
+
+    def _create_po(self, session, seed_data, department_key="IT", supplier_key="A",
+                   product_key="mouse", qty=5) -> str:
+        req = POCreateRequest(
+            department_id=seed_data["departments"][department_key].id,
+            supplier_id=seed_data["suppliers"][supplier_key].id,
+            items=[POCreateItem(product_id=seed_data["products"][product_key].id, quantity=qty)],
+        )
+        return create_purchase_order(session, req).id
+
+    def test_draft_to_pending(self, session, seed_data):
+        po_id = self._create_po(session, seed_data)
+        result = transit_po(session, po_id, "PENDING", "agent")
+
+        assert result.old_status == "DRAFT"
+        assert result.new_status == "PENDING"
+        assert result.budget_impact is None
+
+        budget = get_budget_by_department_id(session, seed_data["departments"]["IT"].id)
+        assert budget.frozen_budget == 50_000  # unchanged from creation
+
+    def test_draft_to_cancelled(self, session, seed_data):
+        po_id = self._create_po(session, seed_data)
+        result = transit_po(session, po_id, "CANCELLED", "agent")
+
+        assert result.old_status == "DRAFT"
+        assert result.new_status == "CANCELLED"
+        assert "已释放冻结预算" in result.budget_impact
+
+        budget = get_budget_by_department_id(session, seed_data["departments"]["IT"].id)
+        assert budget.frozen_budget == 0  # unfrozen
+
+        inv = get_inventory_by_product_id(session, seed_data["products"]["mouse"].id)
+        assert inv.locked_qty == 0
+
+    def test_pending_to_approved(self, session, seed_data):
+        po_id = self._create_po(session, seed_data)
+        transit_po(session, po_id, "PENDING", "agent")
+        result = transit_po(session, po_id, "APPROVED", "finance_manager")
+
+        assert result.new_status == "APPROVED"
+        assert "已扣减预算" in result.budget_impact
+
+        budget = get_budget_by_department_id(session, seed_data["departments"]["IT"].id)
+        assert budget.frozen_budget == 0
+        assert budget.used_budget == 50_000
+
+        inv = get_inventory_by_product_id(session, seed_data["products"]["mouse"].id)
+        assert inv.total_qty == 195
+        assert inv.locked_qty == 0
+
+    def test_pending_to_rejected(self, session, seed_data):
+        po_id = self._create_po(session, seed_data)
+        transit_po(session, po_id, "PENDING", "agent")
+        result = transit_po(session, po_id, "REJECTED", "finance_manager")
+
+        assert result.new_status == "REJECTED"
+        assert "已释放冻结预算" in result.budget_impact
+
+        budget = get_budget_by_department_id(session, seed_data["departments"]["IT"].id)
+        assert budget.frozen_budget == 0
+
+    def test_pending_to_cancelled(self, session, seed_data):
+        po_id = self._create_po(session, seed_data)
+        transit_po(session, po_id, "PENDING", "agent")
+        result = transit_po(session, po_id, "CANCELLED", "agent")
+
+        assert result.new_status == "CANCELLED"
+        assert "已释放冻结预算" in result.budget_impact
+
+    def test_rejected_to_draft(self, session, seed_data):
+        po_id = self._create_po(session, seed_data)
+        transit_po(session, po_id, "PENDING", "agent")
+        transit_po(session, po_id, "REJECTED", "finance_manager")
+        result = transit_po(session, po_id, "DRAFT", "agent")
+
+        assert result.new_status == "DRAFT"
+        assert result.budget_impact is None
+
+    def test_approved_to_cancelled(self, session, seed_data):
+        po_id = self._create_po(session, seed_data)
+        transit_po(session, po_id, "PENDING", "agent")
+        transit_po(session, po_id, "APPROVED", "finance_manager")
+        result = transit_po(session, po_id, "CANCELLED", "agent")
+
+        assert result.new_status == "CANCELLED"
+        assert "已退回预算" in result.budget_impact
+
+        budget = get_budget_by_department_id(session, seed_data["departments"]["IT"].id)
+        assert budget.used_budget == 0
+
+        inv = get_inventory_by_product_id(session, seed_data["products"]["mouse"].id)
+        assert inv.total_qty == 200  # restored
+
+    def test_full_lifecycle(self, session, seed_data):
+        po_id = self._create_po(session, seed_data)
+        transit_po(session, po_id, "PENDING", "agent")
+        transit_po(session, po_id, "APPROVED", "finance_manager")
+        transit_po(session, po_id, "ORDERED", "agent")
+        transit_po(session, po_id, "SHIPPED", "agent")
+        result = transit_po(session, po_id, "RECEIVED", "agent")
+
+        assert result.new_status == "RECEIVED"
+
+    def test_invalid_transition(self, session, seed_data):
+        po_id = self._create_po(session, seed_data)
+        with pytest.raises(InvalidStateTransitionError) as exc:
+            transit_po(session, po_id, "APPROVED", "agent")
+        assert exc.value.context["current_status"] == "DRAFT"
+        assert exc.value.context["target_status"] == "APPROVED"
+
+    def test_permission_denied(self, session, seed_data):
+        po_id = self._create_po(session, seed_data)
+        transit_po(session, po_id, "PENDING", "agent")
+        with pytest.raises(PermissionDeniedError) as exc:
+            transit_po(session, po_id, "APPROVED", "agent")
+        assert exc.value.context["required_role"] == "finance_manager"
+
+    def test_recheck_budget_insufficient(self, session, seed_data):
+        po_id = self._create_po(session, seed_data, department_key="RD",
+                                supplier_key="B", product_key="chair", qty=3)
+        budget = get_budget_by_department_id(session, seed_data["departments"]["RD"].id)
+        budget.used_budget = 4_900_000
+        session.add(budget)
+        session.flush()
+
+        with pytest.raises(BudgetInsufficientError) as exc:
+            transit_po(session, po_id, "PENDING", "agent")
+        assert exc.value.context["required"] == 180_000
+
+    def test_recheck_stock_insufficient(self, session, seed_data):
+        po_id = self._create_po(session, seed_data, product_key="monitor", qty=3)
+        inv = get_inventory_by_product_id(session, seed_data["products"]["monitor"].id)
+        inv.locked_qty = 3
+        session.add(inv)
+        session.flush()
+
+        with pytest.raises(BusinessException) as exc:
+            transit_po(session, po_id, "PENDING", "agent")
+        assert exc.value.error_code == "INSUFFICIENT_STOCK"

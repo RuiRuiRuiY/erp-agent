@@ -159,19 +159,32 @@ def simulate_pricing_logic(items: List[SimulateRequestItem]):
 这是保障财务安全的核心。状态流转不能只是改个字符串，必须伴随**前置校验 (Guard)** 和**副作用 (Action)**。
 
 ```python
-# 定义状态机规则
+# 说明：预算冻结和库存锁定在 create_purchase_order（DRAFT 创建）时已完成，
+#       因此 DRAFT → PENDING 不再重复冻结，改为重新校验（防并发耗竭）。
 STATE_MACHINE = {
     'DRAFT': {
-        'PENDING': {'guard': 'check_budget_and_stock', 'action': 'freeze_budget_and_lock_stock'},
-        'CANCELLED': {'action': 'unlock_stock'}
+        'PENDING':   {'guard': 'recheck_budget_and_stock', 'action': None},
+        'CANCELLED': {'action': 'unfreeze_budget_and_unlock_stock'},
     },
     'PENDING': {
-        'APPROVED': {'guard': 'is_finance_role', 'action': 'deduct_budget_and_consume_stock'}, # 审批通过，冻结转为实际扣减，库存正式出库
-        'REJECTED': {'guard': 'is_finance_role', 'action': 'unfreeze_budget_and_unlock_stock'}, # 驳回，释放冻结预算和库存
-        'CANCELLED': {'action': 'unfreeze_budget_and_unlock_stock'}
+        'APPROVED':  {'guard': 'is_finance_manager', 'action': 'deduct_budget_and_consume_stock'},
+        'REJECTED':  {'guard': 'is_finance_manager', 'action': 'unfreeze_budget_and_unlock_stock'},
+        'CANCELLED': {'action': 'unfreeze_budget_and_unlock_stock'},
     },
-    'REJECTED': {'DRAFT': {'action': None}}, # 驳回后退回草稿修改
-    # ... 其他状态
+    'REJECTED': {
+        'DRAFT':     {'action': None},  # 驳回后退回草稿修改，资源已释放
+    },
+    'APPROVED': {
+        'ORDERED':   {'action': None},
+        'CANCELLED': {'action': 'reverse_approval'},
+    },
+    'ORDERED': {
+        'SHIPPED':   {'action': None},
+        'CANCELLED': {'action': None},
+    },
+    'SHIPPED': {
+        'RECEIVED':  {'action': None},
+    },
 }
 
 def transit_po_logic(po_id: UUID, target_status: str, operator_role: str):
@@ -186,38 +199,44 @@ def transit_po_logic(po_id: UUID, target_status: str, operator_role: str):
     
     # 2. 执行前置校验 (Guard)
     if 'guard' in transition_rule:
-        if transition_rule['guard'] == 'check_budget_and_stock':
+        guard = transition_rule['guard']
+        if guard == 'recheck_budget_and_stock':
+            # 重新校验预算和库存（DRAFT 创建时已冻结，这里防并发耗竭）
             budget = get_budget(po.department_id)
-            inventory = get_inventory(po.product_id)
-            if budget.available < po.total_amount:
+            remaining = budget.total_budget - budget.used_budget - budget.frozen_budget
+            if remaining < po.total_amount:
                 raise BudgetInsufficientError(
                     required=po.total_amount, 
-                    remaining=budget.available,
+                    remaining=remaining,
                     suggestion="请减少采购数量或申请追加预算"
                 )
-            if inventory.available_qty < po.total_qty:
-                raise InsufficientStockError(
-                    product_id=po.product_id,
-                    available=inventory.available_qty,
-                    requested=po.total_qty,
-                )
-        elif transition_rule['guard'] == 'is_finance_role' and operator_role != 'finance_manager':
+            for line in po.lines:
+                inventory = get_inventory(line.product_id)
+                available = inventory.total_qty - inventory.locked_qty
+                if available < line.quantity:
+                    raise InsufficientStockError(
+                        product_id=line.product_id,
+                        available=available,
+                        requested=line.quantity,
+                    )
+        elif guard == 'is_finance_manager' and operator_role != 'finance_manager':
             raise PermissionDeniedError("审批操作需要财务经理权限")
             
     # 3. 执行副作用 (Action) - 涉及预算和库存变动
     if 'action' in transition_rule:
         action = transition_rule['action']
-        if action == 'freeze_budget_and_lock_stock':
-            freeze_budget(po.department_id, po.total_amount)
-            lock_stock(po.product_id, po.total_qty)
-        elif action == 'unfreeze_budget_and_unlock_stock':
+        if action == 'unfreeze_budget_and_unlock_stock':
             unfreeze_budget(po.department_id, po.total_amount)
-            unlock_stock(po.product_id, po.total_qty)
+            for line in po.lines:
+                unlock_stock(line.product_id, line.quantity)
         elif action == 'deduct_budget_and_consume_stock':
             deduct_budget(po.department_id, po.total_amount)
-            consume_stock(po.product_id, po.total_qty)
-        elif action == 'unlock_stock':
-            unlock_stock(po.product_id, po.total_qty)
+            for line in po.lines:
+                consume_stock(line.product_id, line.quantity)
+        elif action == 'reverse_approval':
+            reverse_budget_deduction(po.department_id, po.total_amount)
+            for line in po.lines:
+                reverse_consume_stock(line.product_id, line.quantity)
             
     # 4. 更新状态并保存
     po.status = target_status

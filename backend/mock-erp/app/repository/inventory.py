@@ -48,3 +48,10 @@ def consume_stock(session: Session, product_id: str, qty: int) -> None:
     inv.total_qty -= qty
     inv.locked_qty -= qty
     session.add(inv)
+
+
+def reverse_consume_stock(session: Session, product_id: str, qty: int) -> None:
+    """反向操作：恢复已消耗的库存。"""
+    inv = get_inventory_by_product_id(session, product_id)
+    inv.total_qty += qty
+    session.add(inv)

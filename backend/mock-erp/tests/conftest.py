@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from app.model import (
@@ -6,15 +7,27 @@ from app.model import (
     Department,
     Inventory,
     Product,
+    PurchaseOrder,  # noqa: F401  # registers with SQLModel.metadata
+    PurchaseOrderLine,  # noqa: F401  # registers with SQLModel.metadata
     Supplier,
     SupplierPricelist,
 )
 from sqlmodel import Session, SQLModel, create_engine
 
-engine = create_engine(
-    "sqlite://",
-    connect_args={"check_same_thread": False},
-)
+_TEMP_DB = Path(__file__).parent / "_test_temp.db"
+
+
+def _build_engine() -> any:
+    if _TEMP_DB.exists():
+        _TEMP_DB.unlink()
+    engine = create_engine(
+        f"sqlite:///{_TEMP_DB}",
+        connect_args={"check_same_thread": False},
+    )
+    return engine
+
+
+engine = _build_engine()
 
 
 @pytest.fixture(autouse=True)

@@ -194,18 +194,51 @@ CREATE INDEX idx_po_lines_po_id ON purchase_order_lines(po_id);
 
    - 同时建议在应用层维护一个**状态机**来约束合法跳转：
 
-     ```python
-     VALID_TRANSITIONS = {
-         'DRAFT':     ['PENDING', 'CANCELLED'],
-         'PENDING':   ['APPROVED', 'REJECTED', 'CANCELLED'],
-         'REJECTED':  ['DRAFT'],           # 驳回后可退回草稿修改
-         'APPROVED':  ['ORDERED', 'CANCELLED'],
-         'ORDERED':   ['SHIPPED', 'CANCELLED'],
-         'SHIPPED':   ['RECEIVED'],
-         'RECEIVED':  [],                  # 终态，不可再变
-         'CANCELLED': [],                  # 终态，不可再变
-     }
-     ```
+      ```python
+       # 应用层状态机设计示例 (伪代码)
+       # 说明：预算冻结和库存锁定在 create_purchase_order（DRAFT 创建）时已完成，
+       #       因此 DRAFT → PENDING 不再重复冻结，改为重新校验。
+       STATE_MACHINE = {
+           'DRAFT': {
+               'transitions': {
+                   'PENDING': {
+                       'guard': 'recheck_budget_and_stock',  # 重新校验：预算和库存是否仍然充足
+                       'action': None  # 冻结已在创建时完成，此处只加状态
+                   },
+                   'CANCELLED': {'action': 'unfreeze_budget_and_unlock_stock'}
+               }
+           },
+           'PENDING': {
+               'transitions': {
+                   'APPROVED': {'guard': 'is_finance_manager', 'action': 'deduct_budget_and_consume_stock'},
+                   'REJECTED': {'guard': 'is_finance_manager', 'action': 'unfreeze_budget_and_unlock_stock'},
+                   'CANCELLED': {'action': 'unfreeze_budget_and_unlock_stock'}
+               }
+           },
+           'REJECTED': {
+               'transitions': {
+                   'DRAFT': {'action': None},
+               }
+           },
+           'APPROVED': {
+               'transitions': {
+                   'ORDERED': {'action': None},
+                   'CANCELLED': {'action': 'reverse_approval'},
+               }
+           },
+           'ORDERED': {
+               'transitions': {
+                   'SHIPPED': {'action': None},
+                   'CANCELLED': {'action': None},
+               }
+           },
+           'SHIPPED': {
+               'transitions': {
+                   'RECEIVED': {'action': None},
+               }
+           },
+      }
+      ```
 
    - 为了更好地配合 Agent，建议在状态机中引入 **“副作用 (Side Effects)”** 和 **“角色权限 (Guards)”** 的概念：
 

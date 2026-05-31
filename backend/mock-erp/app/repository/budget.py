@@ -34,3 +34,25 @@ def freeze_budget(session: Session, department_id: str, amount_cents: int) -> Bu
     budget.frozen_budget += amount_cents
     session.add(budget)
     return budget
+
+
+def unfreeze_budget(session: Session, department_id: str, amount_cents: int) -> Budget:
+    budget = get_budget_by_department_id(session, department_id)
+    budget.frozen_budget -= amount_cents
+    session.add(budget)
+    return budget
+
+
+def deduct_budget(session: Session, department_id: str, amount_cents: int) -> Budget:
+    budget = get_budget_by_department_id(session, department_id)
+    budget.frozen_budget -= amount_cents
+    budget.used_budget += amount_cents
+    session.add(budget)
+    return budget
+
+
+def reverse_budget_deduction(session: Session, department_id: str, amount_cents: int) -> Budget:
+    budget = get_budget_by_department_id(session, department_id)
+    budget.used_budget -= amount_cents
+    session.add(budget)
+    return budget
