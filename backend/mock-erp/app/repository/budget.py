@@ -2,7 +2,7 @@ from datetime import date
 
 from sqlmodel import Session, select
 
-from app.core.exceptions import ResourceNotFoundError
+from app.core.exceptions import BudgetInsufficientError, ResourceNotFoundError
 from app.model.budget import Budget
 
 
@@ -23,4 +23,14 @@ def get_budget_by_department_id(
             resource="Budget",
             resource_id=f"dept={department_id}, year={year}",
         )
+    return budget
+
+
+def freeze_budget(session: Session, department_id: str, amount_cents: int) -> Budget:
+    budget = get_budget_by_department_id(session, department_id)
+    remaining = budget.total_budget - budget.used_budget - budget.frozen_budget
+    if remaining < amount_cents:
+        raise BudgetInsufficientError(required=amount_cents, remaining=remaining)
+    budget.frozen_budget += amount_cents
+    session.add(budget)
     return budget

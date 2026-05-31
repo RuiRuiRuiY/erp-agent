@@ -14,7 +14,7 @@
 mock-erp/
 ├── app/
 │   ├── main.py   
-│   ├── core/     
+│   ├── core/   
 │   │   ├── config.py   
 │   │   ├── database.py   
 │   │   └── exceptions.py   
@@ -161,13 +161,13 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
 
 **Phase B: 核心交易 (Write APIs)**
 
-- [ ] **Task 2.4**: **攻坚** 价格试算引擎 🌟
+- [X] **Task 2.4**: **攻坚** 价格试算引擎 🌟
 
   - `schema/pricing.py` (SimulateRequest/Response)
   - `service/pricing.py` (多供应商阶梯比价算法)
   - `api/v1/pricing.py` (POST /pricing/simulate)
   - 测试: 阶梯匹配 + 推荐逻辑 (含陷阱数据验证)
-- [ ] **Task 2.5**: 采购单创建
+- [X] **Task 2.5**: 采购单创建
 
   - `schema/purchase_order.py` (create 部分)
   - `repository/purchase_order.py` (主子表持久化)

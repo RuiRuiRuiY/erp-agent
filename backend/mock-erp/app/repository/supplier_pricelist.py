@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from sqlmodel import Session, desc, select
 
 from app.model.supplier_pricelist import SupplierPricelist
@@ -41,3 +43,20 @@ def get_pricelists_by_product_ids(
         )
     )
     return list(session.exec(stmt).all())
+
+
+def get_pricelists_by_supplier_and_products(
+    session: Session,
+    supplier_id: str,
+    product_ids: list[str],
+) -> dict[str, list[SupplierPricelist]]:
+    stmt = (
+        select(SupplierPricelist)
+        .where(SupplierPricelist.supplier_id == supplier_id)
+        .where(SupplierPricelist.product_id.in_(product_ids))
+        .order_by(SupplierPricelist.product_id, desc(SupplierPricelist.min_qty))
+    )
+    result: dict[str, list[SupplierPricelist]] = defaultdict(list)
+    for pl in session.exec(stmt).all():
+        result[pl.product_id].append(pl)
+    return result
