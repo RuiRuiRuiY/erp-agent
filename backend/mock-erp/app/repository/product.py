@@ -17,3 +17,15 @@ def get_product_by_id(session: Session, product_id: str) -> Product:
     if not product:
         raise ResourceNotFoundError(resource="Product", resource_id=product_id)
     return product
+
+
+def get_products_by_ids(
+    session: Session,
+    product_ids: list[str],
+) -> dict[str, Product]:
+    stmt = select(Product).where(Product.id.in_(product_ids))
+    result = {p.id: p for p in session.exec(stmt).all()}
+    for pid in product_ids:
+        if pid not in result:
+            raise ResourceNotFoundError(resource="Product", resource_id=pid)
+    return result

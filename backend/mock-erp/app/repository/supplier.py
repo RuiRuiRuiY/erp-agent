@@ -17,3 +17,11 @@ def get_supplier_by_id(session: Session, supplier_id: str) -> Supplier:
     if not supplier:
         raise ResourceNotFoundError(resource="Supplier", resource_id=supplier_id)
     return supplier
+
+
+def get_suppliers_by_ids(
+    session: Session,
+    supplier_ids: list[str],
+) -> dict[str, Supplier]:
+    stmt = select(Supplier).where(Supplier.id.in_(supplier_ids))
+    return {s.id: s for s in session.exec(stmt).all()}

@@ -13,8 +13,8 @@
 ```text
 mock-erp/
 ├── app/
-│   ├── main.py         
-│   ├── core/           
+│   ├── main.py   
+│   ├── core/     
 │   │   ├── config.py   
 │   │   ├── database.py   
 │   │   └── exceptions.py   
@@ -67,7 +67,7 @@ mock-erp/
 │   │   └── budget.py           # 预算原子性读写 (供 purchase_order 调用)
 │   │
 │   └── agent/                  # 智能体专属层
-│       ├── tools.py    
+│       ├── tools.py  
 │       └── prompts.py  
 ```
 
@@ -209,6 +209,10 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
 - *剧本 B (预算拦截)*：Agent 遭遇预算不足，自主调整方案。
 - *剧本 C (防幻觉测试)*：人类故意诱导 Agent 买不存在的商品，Agent 严谨拒绝。
 - **🏆 最终里程碑**：项目完全工程化，可随时在任意机器上拉起演示。
+
+##### TODO
+
+- [ ] valid_from / valid_to 字段已预留但未被 service 层使用。当前的种子数据和 service 都无视有效期，这是一个"死字段"风险——后续如果生效期逻辑，现有查询会拿到过期阶梯价。
 
 ---
 
