@@ -142,6 +142,7 @@ CREATE TABLE purchase_orders (
     
     created_by_agent INTEGER DEFAULT 0,
     agent_reasoning TEXT,
+    is_override INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (supplier_id) REFERENCES suppliers(id),

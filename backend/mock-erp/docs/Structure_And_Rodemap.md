@@ -6,9 +6,9 @@
 
 ### 一、 对“工程准备”的补充与修改建议
 
-#### 1. 目录结构微调：增加“配置中心”与“Agent 专属层”
+#### 1. 目录结构微调：增加“配置中心”，移除 Agent 专属层
 
-原有的扁平化结构在项目变大后容易臃肿。建议引入 `core` 层管理配置和数据库连接，并显式增加 `agent_tools` 层。
+原有的扁平化结构在项目变大后容易臃肿。建议引入 `core` 层管理配置和数据库连接，剥离 `agent/` 层（该目录属于 `erp-agent` 项目职责，mock-erp 不包含 LLM 客户端代码）。
 
 ```text
 mock-erp/
@@ -66,9 +66,7 @@ mock-erp/
 │   │   ├── purchase_order.py   # 采购单状态机流转 (编排预算 + 库存操作)
 │   │   └── budget.py           # 预算原子性读写 (供 purchase_order 调用)
 │   │
-│   └── agent/                  # 智能体专属层
-│       ├── tools.py  
-│       └── prompts.py  
+│   # └── agent/                # ❌ 已移除，该目录属于 erp-agent 项目
 ```
 
 #### 2. 统一异常处理：补充“HTTP 状态码规范”与“Agent 建议字段”
@@ -184,18 +182,80 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
 
 - **🏆 里程碑 2B**：完成完整的"比价 → 建单 → 提审 → 扣预算"全流程。
 
-#### 🚩 Sprint 3: Agent 工具集成与 LLM 验证 (预计耗时: 25%)
+#### 🚩 Sprint 3: API 完备度与场景支撑 (预计耗时: 25%)
 
-**目标：通过 OpenAI-compatible Function Calling 让大模型接管系统，纯 OpenAPI schema，无需 LangChain。**
+**目标：补齐所有 PRD 场景所需的 API 端点，移除越界目录。mock-erp 定位为纯 REST API 服务方，不包含 LLM 客户端代码。**
 
-- [ ] **Task 3.1**: 配置 LLM 客户端 (`app/agent/client.py`)，支持 OpenAI-compatible API
-- [ ] **Task 3.2**: 实现 Function Calling 适配层 (`app/agent/tools.py`)
-  - 将 FastAPI OpenAPI 端点映射为 LLM 工具描述
-  - 在 system prompt 中注入工具定义
-- [ ] **Task 3.3**: 编写 System Prompt (`app/agent/prompts.py`)，赋予 Agent "专业采购助理"人设，规定其遇到"预算不足"时的思考链路 (Chain of Thought)
-- [ ] **Task 3.4**: 编写 CLI 交互脚本 (`scripts/run_agent.py`)，接入大模型 API
+> **设计原则**：mock-erp 是"被调用方"，只提供标准 REST API + 结构化错误 + 业务规则校验。LLM 客户端、Function Calling、System Prompt 属于 `erp-agent` 项目职责。
 
-- **🏆 里程碑 3**：在终端里通过自然语言对 Agent 说："*研发部急需 5 台高配显示器，帮我走一下采购流程。*" Agent 能自动调用工具并返回结果。
+- [ ] **Task 3.1**: 商品搜索 `GET /products?q=关键词` (PRD 场景 A/E)
+  - `repository/product.py`: 增加 `name` / `category` 的 `LIKE` 查询
+  - `api/v1/product.py`: 增加 `q: str \| None = Query(None)` 可选参数
+  - 向后兼容：`q=None` 时行为不变
+
+- [ ] **Task 3.2**: 供应商报价查询 `GET /suppliers/{id}/pricelists` (PRD 场景 D)
+  - `schema/supplier.py`: 新增 `PricelistItemRead`（含 `valid_from`、`valid_to`）
+  - `repository/supplier_pricelist.py`: 复用 `get_pricelists_by_supplier`（Task 3.7 加过滤后自动受益）
+  - `api/v1/supplier.py`: 新增端点，支持 `?product_id=UUID` 过滤
+  - 支撑 Agent 查看所有阶梯边界以做凑单决策
+
+- [ ] **Task 3.3**: 预算超标特批接口 `POST /po/override` (PRD 场景 C) 🌟
+  - `app/core/config.py`: 新增 `OVERRIDE_TOKEN` 环境变量
+  - `app/model/purchase_order.py`: `PurchaseOrder` 新增 `is_override: bool = Field(default=False)`
+  - `app/repository/budget.py`: `freeze_budget` 增加 `force=False` 参数（跳过余额校验，不改表）
+  - `app/service/purchase_order.py`:
+    - 新增 `create_purchase_order_override()` 服务函数（校验 token → 强制冻结预算 → 创建 PO 设 `is_override=True`）
+    - `transit_po()` guard `recheck_budget_and_stock`: 如果 `po.is_override`，跳过预算重校验（库存重校验仍保留）
+  - `app/schema/purchase_order.py`: 新增 `POCreateOverrideRequest`（含 `override_token: str`）
+  - `app/api/v1/purchase_order.py`: 新增 `POST /po/override` 端点
+  - 流程：Agent 建单遇 `409 BUDGET_INSUFFICIENT` → 询问用户 → 用户提供 token → Agent 调 override 建单 → transit 自动跳过预算重检
+
+- [ ] **Task 3.4**: 试算结果增强交期信息 `POST /pricing/simulate` (PRD 场景 E)
+  - `schema/pricing.py`: `SupplierTotalQuote` 新增 `default_lead_time_days: int`、`rating: float`
+  - `service/pricing.py`: 构建 `all_quotes` 时从 `Supplier` 模型填充这两个字段（已有 `get_suppliers_by_ids` 数据）
+  - 支撑 Agent 一次调用做"价格+交期+评分"综合决策
+
+- [ ] **Task 3.5**: 移除 `app/agent/` 越界目录
+  - 删除 `app/agent/tools.py`、`app/agent/prompts.py`、`app/agent/__init__.py`
+  - 涉及该目录的文档同步更新
+  - 这些文件属于 `erp-agent` 项目职责
+
+- [ ] **Task 3.6**: 新端点测试覆盖
+  - `test_api_product.py`: 搜索命中、无结果、空 q 向后兼容
+  - `test_api_pricelist.py`: 正常返回、按 product_id 过滤、supplier 不存在 404
+  - `test_api_purchase_order.py` / `test_service_purchase_order.py`:
+    - Override 正常创建、无效 token 403、库存不足仍拒绝
+    - 特批单 DRAFT→PENDING 跳过预算重检
+    - 正常单 DRAFT→PENDING 仍报预算不足
+  - `test_service_pricing.py`: Simulate 返回体中 `lead_time_days` 和 `rating` 正确
+
+- [ ] **Task 3.7**: 启用阶梯报价有效期校验 🌟
+  - **背景**：`SupplierPricelist` 模型已有 `valid_from` / `valid_to` 字段，但 repository 层 4 个查询函数**均不过滤**。如果系统包含过期或未来日期的报价，会导致以下级联错误：
+    ```
+    POST /pricing/simulate  → 返回过期报价 ❌
+    POST /po               → 固化过期价格到 PO → 冻结/扣减预算基于错误金额 ❌
+    GET /suppliers/{id}/pricelists (Task 3.2) → 展示过期数据 ❌
+    ```
+    已创建的 PO 不受影响：价格已在 `PurchaseOrderLine.unit_price` 固化为快照，pricelist 过期不影响已有采购单。
+  - `repository/supplier_pricelist.py`: 新增 `_active_filter()` 通用函数，应用到全部 4 个查询：
+    ```python
+    from datetime import date
+    
+    def _active_filter(stmt):
+        today = date.today().isoformat()
+        return stmt.where(
+            SupplierPricelist.valid_from <= today,
+            (SupplierPricelist.valid_to == None) |
+            (SupplierPricelist.valid_to >= today),
+        )
+    ```
+  - 不改 model、不改 schema、不改 seed 数据（seed 默认 `valid_from=today, valid_to=None`，自然通过过滤）
+  - `tests/test_repository_supplier_pricelist.py`（新增）:
+    - 过期报价不被 `get_pricelists_by_product_ids` 返回
+    - 未来报价不被 `get_pricelists_by_supplier_and_products` 返回
+    - 混合数据（有效+过期）只返回有效数据
+
+- **🏆 里程碑 3**：API 面完备，覆盖 PRD 全部 5 个场景的接口需求。所有 pricelist 查询已启用有效期过滤，过期/未来报价不会进入业务逻辑。
 
 #### 🚩 Sprint 4: 端到端测试、容器化与演示准备 (预计耗时: 15%)
 
@@ -212,7 +272,8 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
 
 ##### TODO
 
-- [ ] valid_from / valid_to 字段已预留但未被 service 层使用。当前的种子数据和 service 都无视有效期，这是一个"死字段"风险——后续如果生效期逻辑，现有查询会拿到过期阶梯价。
+- [X] valid_from / valid_to 字段已预留但未被 service 层使用。当前的种子数据和 service 都无视有效期，这是一个"死字段"风险——后续如果生效期逻辑，现有查询会拿到过期阶梯价。
+  - **已在 Sprint 3 Task 3.7 修复**：repository 层 4 个查询函数均已加 `_active_filter()` 过滤，过期/未来报价不再进入业务逻辑。
 
 ---
 
