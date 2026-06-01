@@ -8,8 +8,15 @@ def get_products(
     session: Session,
     skip: int = 0,
     limit: int = 100,
+    q: str | None = None,
 ) -> list[Product]:
-    return list(session.exec(select(Product).offset(skip).limit(limit)).all())
+    stmt = select(Product)
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(
+            Product.name.like(like) | Product.category.like(like),
+        )
+    return list(session.exec(stmt.offset(skip).limit(limit)).all())
 
 
 def get_product_by_id(session: Session, product_id: str) -> Product:

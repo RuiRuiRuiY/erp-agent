@@ -8,12 +8,14 @@ from app.model.supplier_pricelist import SupplierPricelist
 def get_pricelists_by_supplier(
     session: Session,
     supplier_id: str,
+    product_id: str | None = None,
 ) -> list[SupplierPricelist]:
-    stmt = (
-        select(SupplierPricelist)
-        .where(SupplierPricelist.supplier_id == supplier_id)
-        .order_by(SupplierPricelist.product_id, desc(SupplierPricelist.min_qty))
+    stmt = select(SupplierPricelist).where(
+        SupplierPricelist.supplier_id == supplier_id,
     )
+    if product_id:
+        stmt = stmt.where(SupplierPricelist.product_id == product_id)
+    stmt = stmt.order_by(SupplierPricelist.product_id, desc(SupplierPricelist.min_qty))
     return list(session.exec(stmt).all())
 
 
