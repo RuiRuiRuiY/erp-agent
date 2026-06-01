@@ -77,9 +77,12 @@ def simulate_pricing(
                     subtotal=0.0,
                 ))
 
+        supplier = suppliers[supplier_id]
         all_quotes.append(SupplierTotalQuote(
             supplier_id=supplier_id,
             supplier_name=supplier_names.get(supplier_id, "Unknown"),
+            default_lead_time_days=supplier.default_lead_time_days,
+            rating=supplier.rating,
             total_amount=_cents_to_yuan(total_cents),
             can_fulfill=can_fulfill,
             line_details=lines,

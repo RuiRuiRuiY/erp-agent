@@ -27,6 +27,8 @@ class SupplierTotalQuote(BaseModel):
 
     supplier_id: str
     supplier_name: str
+    default_lead_time_days: int
+    rating: float
     total_amount: float
     can_fulfill: bool
     line_details: list[SupplierQuoteDetail]

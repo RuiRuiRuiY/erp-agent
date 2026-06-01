@@ -30,6 +30,12 @@ class TestPricingAPI:
         assert len(body["all_quotes"]) > 0
         assert body["recommended_supplier_id"] is not None
 
+        for quote in body["all_quotes"]:
+            assert "default_lead_time_days" in quote
+            assert "rating" in quote
+            assert isinstance(quote["default_lead_time_days"], int)
+            assert isinstance(quote["rating"], float)
+
     def test_empty_items_returns_422(self, client: TestClient):
         """items 为空列表 → 422 Unprocessable Entity。"""
         resp = client.post(
