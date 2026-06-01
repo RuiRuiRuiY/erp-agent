@@ -212,7 +212,7 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
   - 流程：Agent 建单遇 `409 BUDGET_INSUFFICIENT` → 询问用户 → 用户提供 token → Agent 调 override 建单 → transit 自动跳过预算重检
 - 测试
   
-- [ ] **Task 3.4**: 试算结果增强交期信息 `POST /pricing/simulate` (PRD 场景 E)
+- [x] **Task 3.4**: 试算结果增强交期信息 `POST /pricing/simulate` (PRD 场景 E)
   - `schema/pricing.py`: `SupplierTotalQuote` 新增 `default_lead_time_days: int`、`rating: float`
   - `service/pricing.py`: 构建 `all_quotes` 时从 `Supplier` 模型填充这两个字段（已有 `get_suppliers_by_ids` 数据）
   - 支撑 Agent 一次调用做"价格+交期+评分"综合决策
@@ -223,7 +223,7 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
   - 涉及该目录的文档同步更新
   - 这些文件属于 `erp-agent` 项目职责
 
-- [ ] **Task 3.6**: 新端点测试覆盖
+- [x] **Task 3.6**: 新端点测试覆盖
   - `test_api_product.py`: 搜索命中、无结果、空 q 向后兼容
   - `test_api_pricelist.py`: 正常返回、按 product_id 过滤、supplier 不存在 404
   - `test_api_purchase_order.py` / `test_service_purchase_order.py`:
@@ -232,7 +232,7 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
     - 正常单 DRAFT→PENDING 仍报预算不足
   - `test_service_pricing.py`: Simulate 返回体中 `lead_time_days` 和 `rating` 正确
 
-- [ ] **Task 3.7**: 启用阶梯报价有效期校验 🌟
+- [x] **Task 3.7**: 启用阶梯报价有效期校验 🌟
   - **背景**：`SupplierPricelist` 模型已有 `valid_from` / `valid_to` 字段，但 repository 层 4 个查询函数**均不过滤**。如果系统包含过期或未来日期的报价，会导致以下级联错误：
     ```
     POST /pricing/simulate  → 返回过期报价 ❌

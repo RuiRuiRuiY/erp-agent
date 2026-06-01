@@ -1,8 +1,18 @@
 from collections import defaultdict
+from datetime import date
 
 from sqlmodel import Session, desc, select
 
 from app.model.supplier_pricelist import SupplierPricelist
+
+
+def _active_filter(stmt):
+    today = date.today().isoformat()
+    return stmt.where(
+        SupplierPricelist.valid_from <= today,
+        (SupplierPricelist.valid_to == None)
+        | (SupplierPricelist.valid_to >= today),
+    )
 
 
 def get_pricelists_by_supplier(
@@ -15,7 +25,7 @@ def get_pricelists_by_supplier(
     )
     if product_id:
         stmt = stmt.where(SupplierPricelist.product_id == product_id)
-    stmt = stmt.order_by(SupplierPricelist.product_id, desc(SupplierPricelist.min_qty))
+    stmt = _active_filter(stmt).order_by(SupplierPricelist.product_id, desc(SupplierPricelist.min_qty))
     return list(session.exec(stmt).all())
 
 
@@ -24,7 +34,7 @@ def get_pricelists_by_product(
     product_id: str,
 ) -> list[SupplierPricelist]:
     stmt = (
-        select(SupplierPricelist)
+        _active_filter(select(SupplierPricelist))
         .where(SupplierPricelist.product_id == product_id)
         .order_by(desc(SupplierPricelist.min_qty))
     )
@@ -36,7 +46,7 @@ def get_pricelists_by_product_ids(
     product_ids: list[str],
 ) -> list[SupplierPricelist]:
     stmt = (
-        select(SupplierPricelist)
+        _active_filter(select(SupplierPricelist))
         .where(SupplierPricelist.product_id.in_(product_ids))
         .order_by(
             SupplierPricelist.supplier_id,
@@ -53,7 +63,7 @@ def get_pricelists_by_supplier_and_products(
     product_ids: list[str],
 ) -> dict[str, list[SupplierPricelist]]:
     stmt = (
-        select(SupplierPricelist)
+        _active_filter(select(SupplierPricelist))
         .where(SupplierPricelist.supplier_id == supplier_id)
         .where(SupplierPricelist.product_id.in_(product_ids))
         .order_by(SupplierPricelist.product_id, desc(SupplierPricelist.min_qty))
