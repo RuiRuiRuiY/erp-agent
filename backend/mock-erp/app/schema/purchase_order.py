@@ -13,6 +13,10 @@ class POCreateRequest(BaseModel):
     agent_reasoning: str | None = None
 
 
+class POCreateOverrideRequest(POCreateRequest):
+    override_token: str
+
+
 class POLineRead(BaseModel):
     id: str
     product_id: str

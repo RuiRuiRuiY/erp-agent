@@ -26,11 +26,17 @@ def get_budget_by_department_id(
     return budget
 
 
-def freeze_budget(session: Session, department_id: str, amount_cents: int) -> Budget:
+def freeze_budget(
+    session: Session,
+    department_id: str,
+    amount_cents: int,
+    force: bool = False,
+) -> Budget:
     budget = get_budget_by_department_id(session, department_id)
-    remaining = budget.total_budget - budget.used_budget - budget.frozen_budget
-    if remaining < amount_cents:
-        raise BudgetInsufficientError(required=amount_cents, remaining=remaining)
+    if not force:
+        remaining = budget.total_budget - budget.used_budget - budget.frozen_budget
+        if remaining < amount_cents:
+            raise BudgetInsufficientError(required=amount_cents, remaining=remaining)
     budget.frozen_budget += amount_cents
     session.add(budget)
     return budget

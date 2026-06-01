@@ -188,18 +188,19 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
 
 > **设计原则**：mock-erp 是"被调用方"，只提供标准 REST API + 结构化错误 + 业务规则校验。LLM 客户端、Function Calling、System Prompt 属于 `erp-agent` 项目职责。
 
-- [ ] **Task 3.1**: 商品搜索 `GET /products?q=关键词` (PRD 场景 A/E)
+- [x] **Task 3.1**: 商品搜索 `GET /products?q=关键词` (PRD 场景 A/E)
+  
   - `repository/product.py`: 增加 `name` / `category` 的 `LIKE` 查询
   - `api/v1/product.py`: 增加 `q: str \| None = Query(None)` 可选参数
-  - 向后兼容：`q=None` 时行为不变
-
-- [ ] **Task 3.2**: 供应商报价查询 `GET /suppliers/{id}/pricelists` (PRD 场景 D)
+- 向后兼容：`q=None` 时行为不变
+  
+- [x] **Task 3.2**: 供应商报价查询 `GET /suppliers/{id}/pricelists` (PRD 场景 D)
   - `schema/supplier.py`: 新增 `PricelistItemRead`（含 `valid_from`、`valid_to`）
   - `repository/supplier_pricelist.py`: 复用 `get_pricelists_by_supplier`（Task 3.7 加过滤后自动受益）
   - `api/v1/supplier.py`: 新增端点，支持 `?product_id=UUID` 过滤
   - 支撑 Agent 查看所有阶梯边界以做凑单决策
 
-- [ ] **Task 3.3**: 预算超标特批接口 `POST /po/override` (PRD 场景 C) 🌟
+- [x] **Task 3.3**: 预算超标特批接口 `POST /po/override` (PRD 场景 C) 🌟
   - `app/core/config.py`: 新增 `OVERRIDE_TOKEN` 环境变量
   - `app/model/purchase_order.py`: `PurchaseOrder` 新增 `is_override: bool = Field(default=False)`
   - `app/repository/budget.py`: `freeze_budget` 增加 `force=False` 参数（跳过余额校验，不改表）
@@ -209,13 +210,15 @@ Agent 不仅读取 JSON Body，**对 HTTP 状态码也非常敏感**。
   - `app/schema/purchase_order.py`: 新增 `POCreateOverrideRequest`（含 `override_token: str`）
   - `app/api/v1/purchase_order.py`: 新增 `POST /po/override` 端点
   - 流程：Agent 建单遇 `409 BUDGET_INSUFFICIENT` → 询问用户 → 用户提供 token → Agent 调 override 建单 → transit 自动跳过预算重检
-
+- 测试
+  
 - [ ] **Task 3.4**: 试算结果增强交期信息 `POST /pricing/simulate` (PRD 场景 E)
   - `schema/pricing.py`: `SupplierTotalQuote` 新增 `default_lead_time_days: int`、`rating: float`
   - `service/pricing.py`: 构建 `all_quotes` 时从 `Supplier` 模型填充这两个字段（已有 `get_suppliers_by_ids` 数据）
   - 支撑 Agent 一次调用做"价格+交期+评分"综合决策
-
-- [ ] **Task 3.5**: 移除 `app/agent/` 越界目录
+- 测试
+  
+- [x] **Task 3.5**: 移除 `app/agent/` 越界目录
   - 删除 `app/agent/tools.py`、`app/agent/prompts.py`、`app/agent/__init__.py`
   - 涉及该目录的文档同步更新
   - 这些文件属于 `erp-agent` 项目职责

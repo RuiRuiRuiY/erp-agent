@@ -22,6 +22,7 @@ class PurchaseOrder(Base, table=True):
     total_amount: int = Field(default=0)
     created_by_agent: bool = Field(default=False)
     agent_reasoning: str | None = Field(default=None)
+    is_override: bool = Field(default=False)
     created_at: str = Field(
         default_factory=lambda: datetime.now().isoformat(),
     )

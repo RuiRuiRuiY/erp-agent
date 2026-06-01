@@ -136,3 +136,67 @@ class TestTransitPurchaseOrderAPI:
         })
         assert resp.status_code == 404
         assert resp.json()["error_code"] == "RESOURCE_NOT_FOUND"
+
+
+class TestOverridePurchaseOrderAPI:
+    def test_override_success(self, client, seed_data):
+        payload = {
+            "department_id": seed_data["departments"]["RD"].id,
+            "supplier_id": seed_data["suppliers"]["B"].id,
+            "items": [
+                {"product_id": seed_data["products"]["mouse"].id, "quantity": 53},
+            ],
+            "override_token": "override-secret-2025",
+        }
+        resp = client.post("/api/v1/po/override", json=payload)
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["status"] == "DRAFT"
+        assert body["po_number"].startswith("PO-")
+        assert body["total_amount"] == 5035.0
+
+    def test_override_invalid_token_returns_403(self, client, seed_data):
+        payload = {
+            "department_id": seed_data["departments"]["RD"].id,
+            "supplier_id": seed_data["suppliers"]["B"].id,
+            "items": [
+                {"product_id": seed_data["products"]["chair"].id, "quantity": 1},
+            ],
+            "override_token": "wrong-token",
+        }
+        resp = client.post("/api/v1/po/override", json=payload)
+        assert resp.status_code == 403
+        assert resp.json()["error_code"] == "PERMISSION_DENIED"
+
+    def test_override_stock_insufficient_returns_409(self, client, seed_data):
+        payload = {
+            "department_id": seed_data["departments"]["RD"].id,
+            "supplier_id": seed_data["suppliers"]["B"].id,
+            "items": [
+                {"product_id": seed_data["products"]["monitor"].id, "quantity": 10},
+            ],
+            "override_token": "override-secret-2025",
+        }
+        resp = client.post("/api/v1/po/override", json=payload)
+        assert resp.status_code == 409
+        assert resp.json()["error_code"] == "INSUFFICIENT_STOCK"
+
+    def test_override_po_transit_skips_budget_recheck(self, client, seed_data):
+        payload = {
+            "department_id": seed_data["departments"]["RD"].id,
+            "supplier_id": seed_data["suppliers"]["B"].id,
+            "items": [
+                {"product_id": seed_data["products"]["chair"].id, "quantity": 1},
+            ],
+            "override_token": "override-secret-2025",
+        }
+        resp = client.post("/api/v1/po/override", json=payload)
+        po_id = resp.json()["id"]
+
+        resp = client.post(f"/api/v1/po/{po_id}/transit", json={
+            "target_status": "PENDING",
+            "operator_role": "agent",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["old_status"] == "DRAFT"
+        assert resp.json()["new_status"] == "PENDING"

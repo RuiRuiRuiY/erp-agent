@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from sqlmodel import Session
 
+from app.core.config import settings
 from app.core.exceptions import (
     BudgetInsufficientError,
     BusinessException,
@@ -32,6 +33,7 @@ from app.repository.purchase_order import get_po_by_id
 from app.repository.supplier import get_supplier_by_id
 from app.repository.supplier_pricelist import get_pricelists_by_supplier_and_products
 from app.schema.purchase_order import (
+    POCreateOverrideRequest,
     POCreateRequest,
     POLineRead,
     PORead,
@@ -86,7 +88,13 @@ def _po_to_read(
     )
 
 
-def create_purchase_order(session: Session, req: POCreateRequest) -> PORead:
+def create_purchase_order(
+    session: Session,
+    req: POCreateRequest,
+    *,
+    _force_freeze: bool = False,
+    _is_override: bool = False,
+) -> PORead:
     supplier = get_supplier_by_id(session, req.supplier_id)
     department = get_department_by_id(session, req.department_id)
 
@@ -119,7 +127,7 @@ def create_purchase_order(session: Session, req: POCreateRequest) -> PORead:
             unit_price=unit_cents,
         ))
 
-    freeze_budget(session, req.department_id, total_cents)
+    freeze_budget(session, req.department_id, total_cents, force=_force_freeze)
 
     for item in req.items:
         lock_stock(session, item.product_id, item.quantity)
@@ -132,6 +140,7 @@ def create_purchase_order(session: Session, req: POCreateRequest) -> PORead:
         total_amount=total_cents,
         created_by_agent=bool(req.agent_reasoning),
         agent_reasoning=req.agent_reasoning,
+        is_override=_is_override,
         lines=lines_data,
     )
     session.add(po)
@@ -139,6 +148,20 @@ def create_purchase_order(session: Session, req: POCreateRequest) -> PORead:
     session.refresh(po)
 
     return _po_to_read(po, supplier.name, department.name, products)
+
+
+def create_purchase_order_override(
+    session: Session,
+    req: POCreateOverrideRequest,
+) -> PORead:
+    if req.override_token != settings.OVERRIDE_TOKEN:
+        raise PermissionDeniedError(required_role="valid override_token")
+    return create_purchase_order(
+        session,
+        req,
+        _force_freeze=True,
+        _is_override=True,
+    )
 
 
 STATE_MACHINE: dict[str, dict[str, dict]] = {
@@ -170,10 +193,11 @@ STATE_MACHINE: dict[str, dict[str, dict]] = {
 
 def _execute_guard(session: Session, guard: str, po: PurchaseOrder, operator_role: str) -> None:
     if guard == 'recheck_budget_and_stock':
-        budget = get_budget_by_department_id(session, po.department_id)
-        remaining = budget.total_budget - budget.used_budget - budget.frozen_budget
-        if remaining < po.total_amount:
-            raise BudgetInsufficientError(required=po.total_amount, remaining=remaining)
+        if not po.is_override:
+            budget = get_budget_by_department_id(session, po.department_id)
+            remaining = budget.total_budget - budget.used_budget - budget.frozen_budget
+            if remaining < po.total_amount:
+                raise BudgetInsufficientError(required=po.total_amount, remaining=remaining)
         for line in po.lines:
             inv = get_inventory_by_product_id(session, line.product_id)
             available = inv.total_qty - inv.locked_qty

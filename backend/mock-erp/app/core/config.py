@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Mock ERP API"
     # 数据库 URL，默认使用本地 SQLite 文件
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./mock_erp.db")
+    # 预算特批令牌，Agent 获取用户授权后传入此令牌创建特批采购单
+    OVERRIDE_TOKEN: str = os.getenv("OVERRIDE_TOKEN", "override-secret-2025")
 
     class Config:
         env_file = ".env"
