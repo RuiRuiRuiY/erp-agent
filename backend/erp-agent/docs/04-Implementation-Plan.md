@@ -78,23 +78,24 @@ gantt
 
 ### Day 2: mock-erp 全量 API 对接
 
-- [ ] **Task 2.1**: 梳理 mock-erp 全部 API 端点 `[P0 · 20min]`
-  - 产出: `app/mcp/tools.py` 中的 endpoint 列表
-  - 验收: 覆盖 10+ 个端点
+- [x] **Task 2.1**: 梳理 mock-erp 全部 13 个 API 端点 `[P0 · 20min]`
+  - 产出: `app/mcp/tools.py` 顶部注释 —— 13 端点的完整映射清单
+  - 验收: 清单包含 HTTP Method、路径、入参概要、响应概要，无遗漏
+  - 参考: mock-erp `api/v1/` 各 router 文件
 
-- [ ] **Task 2.2**: 实现 HTTP Client 层 `[P0 · 40min]`
-  - 产出: `app/mcp/server.py` (httpx.AsyncClient, base URL)
-  - 验收: 能调用 mock-erp 并拿到裸 JSON
+- [x] **Task 2.2**: 实现 HTTP Client 层 `[P0 · 40min]`
+  - 产出: `app/mcp/server.py` (httpx.AsyncClient, base URL, GET/POST 泛化函数 + 结构化错误)
+  - 验收: 已验证对所有文档化端点的调用，包含 GET /products、/departments、/budgets/{id}、/suppliers 以及 POST /pricing/simulate
 
-- [ ] **Task 2.3**: 实现全部 10 个 MCP 工具 (裸 JSON，无 Pruning) `[P0 · 1h]`
+- [x] **Task 2.3**: 实现全部 10 个 MCP 工具 (裸 JSON，无 Pruning) `[P0 · 1h]`
   - 产出: `app/mcp/tools.py` (search_product, check_department, check_budget, check_inventory, list_suppliers, get_supplier_pricelist, simulate_purchase, draft_purchase_order, override_purchase_order, transit_po_status)
-  - 验收: 每个 tools 函数返回 mock-erp 原始响应
+  - 验收: 10 工具全部注册 + 端到端验证通过（含 DRAFT→PENDING→APPROVED 两步流转 + 非法流转 ErpApiError 拦截）
 
-- [ ] **Task 2.4**: 单独验证每个工具在终端的手动调用 `[P1 · 30min]`
+- [x] **Task 2.4**: 单独验证每个工具在终端的手动调用 `[P1 · 30min]`
   - 产出: 测试脚本 `scripts/verify_tools.py`
   - 验收: 10 个工具均调通，mock-erp 数据完整
 
-- [ ] **复盘: Day 2**
+- [x] **复盘: Day 2**
   - 验收: 全部 10 个工具可调通并返回数据
 
 ⚠️ **注意**：Day 2 专注"通"，不关注响应裁剪。裁剪在第 3 天做。
