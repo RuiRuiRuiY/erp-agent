@@ -1,8 +1,8 @@
-# ERP-Agent 智能采购中枢 产品需求文档 (PRD V5.0)
+# ERP-Agent 智能采购中枢 产品需求文档 (PRD V6.0)
 
-**文档版本**：V5.0 (双库隔离与极简 RBAC 确权版)
+**文档版本**：V6.0 (全场景覆盖与行为规范确权版)
 **项目阶段**：Week 2 - Week 4 实施期
-**核心依赖**：LangGraph, MCP, FastAPI, SQLite (WAL), PostgreSQL, 飞书开放平台, SQLAdmin
+**核心依赖**：LangGraph, MCP (modelcontextprotocol), FastAPI, SQLite (WAL), PostgreSQL, 飞书开放平台, SQLAdmin, Claude API / GPT-4o
 
 ------
 
@@ -19,6 +19,8 @@
 2. **MCP 协议与数据裁剪 (Pruning)**：将庞大的 ERP JSON 转化为 LLM 友好的摘要，硬编码拦截越权，防幻觉。
 3. **结构化异常自愈**：Agent 捕获 ERP 结构化错误（如 409 库存不足）并自动触发替代方案。
 4. **Dev Mode 身份劫持**：单物理账号完美映射多逻辑角色，打通全链路 E2E 测试。
+5. **五场景 Agent 行为规范**：基于 mock-erp 的结构化错误与业务陷阱，预定义 Agent 在常规采购、库存不足、预算超标、阶梯凑单、综合寻源 5 个场景的决策逻辑。
+6. **LLM 选型与 Prompt 工程**：明确 LLM 模型规格与 System Prompt 设计策略，确保 Agent 行为可预测、可调试。
 
 ------
 
@@ -59,36 +61,87 @@
 
   ```python
   class AgentState(TypedDict):
-      messages: Annotated[list, add_messages]
-      department_id: str           # 提取出的部门 ID
-      cart_items: list             # 用户意图采购的商品清单
-      simulate_result: dict        # 试算引擎返回的裁剪后数据
-      po_draft_id: str             # 创建的草稿单 ID
-      override_token: str          # 人类提供的特批 Token
-      error_context: dict          # 捕获的结构化错误 (含 agent_suggestion)
+      # --- LangGraph 核心 ---
+      messages: Annotated[list, add_messages]   # 对话历史
+      thread_id: str                            # LangGraph 线程 ID (绑定 Langfuse)
+      session_id: str                           # 飞书群/用户会话 ID
+
+      # --- 业务上下文 ---
+      department_id: str                        # 提取出的部门 ID
+      cart_items: list[CartItem]                # 用户意图采购的商品清单
+      selected_supplier_id: str | None          # 用户选择的供应商 ID
+      supplier_choice_prompted: bool            # 是否已向用户展示供应商选项
+
+      # --- 试算与建单 ---
+      simulate_result: dict                     # 试算引擎返回的裁剪后数据
+      po_draft_id: str | None                   # 创建的草稿单 ID
+      po_status: str | None                     # 当前 PO 生命周期状态
+
+      # --- HITL / 审批 ---
+      override_token: str | None                # 人类提供的特批 Token
+      operator_role: str                        # 当前操作者角色 (agent / finance_manager)
+
+      # --- 错误自愈 ---
+      error_context: dict | None                # 捕获的结构化错误 (含 error_code, context, agent_suggestion)
+      recovery_attempted: bool                  # 是否已尝试过自动恢复
   ```
 
 - MCP 工具映射与 Pruning 策略 (核心技术壁垒)
 
   ：
 
-  | MCP Tool 名称          | 对应 Mock-ERP API        | MCP Pruning (数据裁剪) 策略                                  | 预期优化    |
-  | ---------------------- | ------------------------ | ------------------------------------------------------------ | ----------- |
-  | `search_catalog`       | `GET /products`          | 剔除审计字段，仅保留 `id`, `sku`, `name`, `price`。          | 📉 Token 40% |
-  | `simulate_purchase`    | `POST /pricing/simulate` | **智能摘要化**：仅保留推荐供应商明细，其他供应商仅保留总价和交期。 | 📉 Token 80% |
-  | `draft_purchase_order` | `POST /po`               | MCP 层强制校验推理要素（如 `agent_reasoning`），否则拦截重写。 | 🛡️ 防幻觉    |
-  | `transit_po_status`    | `POST /po/{id}/transit`  | MCP 层**硬编码** `operator_role="agent"`，封死 LLM 伪造角色的越权漏洞。 | 🛡️ 防越权    |
+  | MCP Tool 名称                | 对应 Mock-ERP API              | MCP Pruning (数据裁剪) 策略                                                              | 预期优化     |
+  | ---------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------- | ------------ |
+  | `search_product`             | `GET /products`                | 剔除审计字段，仅保留 `id`, `sku`, `name`, `price`。                                       | 📉 Token 40%  |
+  | `check_department`           | `GET /departments`             | 仅保留 `id`, `name`。                                                                     | 📉 Token 50%  |
+  | `check_budget`               | `GET /budgets/{department_id}` | 保留 `department_id`, `available`(已计算剩余)，剔除 `fiscal_year` 等审计字段。                | 📉 Token 60%  |
+  | `check_inventory`            | `GET /inventory/{product_id}`  | 仅保留 `product_id`, `available_qty`(计算字段)。                                          | 📉 Token 70%  |
+  | `list_suppliers`             | `GET /suppliers`               | 保留 `id`, `name`, `rating`, `default_lead_time_days`，剔除 `contact` 等无关字段。          | 📉 Token 50%  |
+  | `get_supplier_pricelist`     | `GET /suppliers/{id}/pricelists` | 摘要化：仅保留 `product_id`, `min_qty`, `unit_price`，剔除有效期等审计字段。                | 📉 Token 60%  |
+  | `simulate_purchase`          | `POST /pricing/simulate`       | **智能摘要化**：保留推荐供应商完整明细；其他供应商仅保留总价、交期和 skipped 原因；保留预算信息。 | 📉 Token 80%  |
+  | `draft_purchase_order`       | `POST /po`                     | MCP 层强制校验 `agent_reasoning` 字段是否包含有效推理链，否则拦截重写。                     | 🛡️ 防幻觉     |
+  | `override_purchase_order`    | `POST /po/override`            | MCP 层强制注入 `override_token`，LLM 不可操控该参数；校验 token 格式。                      | 🛡️ 防越权     |
+  | `transit_po_status`          | `POST /po/{id}/transit`        | MCP 层**硬编码** `operator_role`，根据路由来源自动决定：Agent 自主流转为 `"agent"`，HITL 回调审批为 `"finance_manager"`。 | 🛡️ 防越权 |
 
-- 核心节点与路由 (HITL 挂起)
+- 核心节点与路由 (HITL 挂起 & operator_role 切换)
 
   ：
 
   - 在 `hitl_override_gate` 节点配置 `interrupt_before`。当预算超标时，Agent 挂起并持久化至 PostgreSQL。
   - 系统通过飞书卡片或 ERP 管控台向人类索要 `OVERRIDE_TOKEN`，注入后唤醒 Agent 继续执行。
+  - **operator_role 切换机制**：Agent 自主调用 `transit_po_status` 时 `operator_role="agent"`（仅限 DRAFT→PENDING 等非审批状态流转）。HITL 回调触发审批时，由飞书网关或管控台将 `operator_role` 提升为 `"finance_manager"`（对应 APPROVED/REJECTED 状态变更）。MCP 层据此区分"Agent 自主动作"与"人类审批动作"，防止越权。
 
-### 3.3 Mock-ERP 与低代码管控台 (Admin Dashboard)
+### 3.4 Agent 行为规范 (新增 — 详见专项文档)
 
-- 极简 Mock RBAC 鉴权体系
+Agent 的 5 个核心业务场景及对应的行为逻辑，在独立文档中详细定义：
+
+| 场景 | 触发条件 | Agent 行为要点 | 对应 Business Trap |
+|---|---|---|---|
+| S1 常规采购 | 用户指定商品+数量+部门 | 查品→查预算→试算→展示供应商选项→建单 | 价格 vs 交期权衡 |
+| S2 库存不足协商 | 建单时抛 INSUFFICIENT_STOCK | 解析 `agent_suggestion`，推荐替代方案 | 库存不足陷阱 |
+| S3 HITL 审批流 | 试算/建单时预算超限 | 挂起→发审批卡片→接收 Token→resume→override | 预算红线陷阱 |
+| S4 阶梯定价凑单 | 试算结果存在更优阶梯 | 主动建议用户调整数量，说明节省金额 | 阶梯价陷阱 |
+| S5 供应商综合寻源 | 用户未指定供应商或要求对比 | 多维度对比(价格+评分+交期)，给出推荐 | 竞争报价陷阱 |
+
+> **详细行为设计见 [`docs/02-Agent-Business-Behavior.md`](./02-Agent-Business-Behavior.md)**。
+> **技术架构设计见 [`docs/03-Agent-Technical-Arch.md`](./03-Agent-Technical-Arch.md)**。
+> **实施计划见 [`docs/04-Implementation-Plan.md`](./04-Implementation-Plan.md)**。
+
+
+### 3.5 LLM 选型与 Prompt 工程策略
+
+- **LLM 选型**：采用 `deepseek-v4-pro` 平衡推理质量与 Token 成本。备选 `deepseek-v4-flash` 以保证 API 兼容性。
+- **System Prompt 设计**：
+  - 角色定义：ERP 采购助理，仅通过 MCP 工具操作数据，不凭空编造。
+  - 工具使用规范：每次调用前展示推理链（`agent_reasoning`），如 `"搜索 Dell 显示器 → 确认商品 ID → 查询 IT 部预算 → 执行试算"`。
+  - 错误处理指令：收到结构化错误时优先读取 `agent_suggestion` 字段，据此给出用户可操作的回复。
+  - 供应商展示规范：向用户展示供应商选项时，必须同时呈现价格、评分、交期三个维度。
+  - 阶梯价提醒规范：试算结果存在更高阶梯时，必须主动提示用户调整数量。
+- **Token 预算规划**：System Prompt ≈ 800 Tokens；单轮对话 ≈ 2000 Tokens；MCP 工具响应（裁剪后）≈ 400-800 Tokens。3 轮内完成一次完整采购流程。
+
+> **详细 Prompt 模板见技术架构文档 [`03-Agent-Technical-Arch.md`](./03-Agent-Technical-Arch.md)**。
+
+### 3.6 Mock-ERP 与低代码管控台 (Admin Dashboard)
 
   ：
 
@@ -144,7 +197,19 @@
 | 单次任务总 Input Tokens | ~15,000 Tokens          | ~6,000 Tokens           | 上下文消耗降低 **> 60%** |
 | 越权尝试次数            | >0 (LLM 偶发幻觉)       | 0 (MCP 层硬编码拦截)    | 安全漏洞 **0**           |
 
-### 6.2 核心交付物与展示物料
+### 6.2 Agent 行为验收 (5 业务场景 Case 验证)
+
+在每个场景的 LangGraph 节点增加断言式验证（单元测试 + 集成测试）：
+
+| 场景 | 验收标准 | 自动化测试 |
+|---|---|---|
+| S1 常规采购 | Agent 正确选择推荐供应商或按用户意愿切换 | 单元测试覆盖各分支 |
+| S2 库存不足 | Agent 解析 `agent_suggestion` 并向用户给出替代建议 | 模拟 mock-erp 返回 INSUFFICIENT_STOCK |
+| S3 HITL 挂起 | Agent 在预算超标时进入 interrupt，Token 注入后成功 resume | 集成测试验证 interrupt/resume 闭环 |
+| S4 阶梯凑单 | Agent 发现阶梯价差并主动提示用户 | 测试 seed 数据的阶梯价陷阱场景 |
+| S5 综合寻源 | Agent 调用多供应商数据后给出综合推荐 | 测试种子的竞争报价数据 |
+
+### 6.3 核心交付物与展示物料
 
 1. **架构资产**：Mermaid 绘制的轻量级四层解耦与双库物理隔离架构图。
 2. **演示视频**：1.5 倍速“一镜到底”录屏（飞书 LUI 下单 -> 触发挂起 -> 飞书卡片审批 / ERP 后台强行接管）。
