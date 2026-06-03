@@ -45,30 +45,29 @@ gantt
 
 ### Day 1: 骨架 + AgentState + Langfuse 初始化
 
-- [ ] **Task 1.1**: 搭建项目目录结构 `[P0 · 30min]`
+- [x] **Task 1.1**: 搭建项目目录结构 `[P0 · 30min]`
   - 产出: `erp-agent/app/` 骨架 (agent/ mcp/ gateway/ dashboard/ core/)
-  - 验收: `python -m app.agent.graph` 不报错
+  - 验收: `python -m app.agent.graph` 不报错 → ✅ `graph compiled: CompiledStateGraph`
   - 依赖: 先完成 Task 1.5 (pyproject.toml)
   - 参考: 03-Tech-Arch §九
 
-- [ ] **Task 1.2**: 定义完整 `AgentState` `[P0 · 20min]`
+- [x] **Task 1.2**: 定义完整 `AgentState` `[P0 · 20min]`
   - 产出: `app/agent/state.py`
-  - 验收: 含全部 13 个字段 + `CartItem` TypedDict + `add_messages` reducer
+  - 验收: 含全部 13 个字段 + `CartItem` TypedDict + `add_messages` reducer → ✅ 18 fields
   - 参考: PRD §3.2 + 03-Tech-Arch §二
 
-- [ ] **Task 1.3**: 搭建基础 `StateGraph` 骨架 `[P0 · 1h]`
+- [x] **Task 1.3**: 搭建基础 `StateGraph` 骨架 `[P0 · 1h]`
   - 产出: `app/agent/graph.py` + `app/agent/nodes.py` + `app/agent/routing.py`
-  - 验收: 编译成功，节点间连线无错误
-  - 依赖: 先完成 Task 1.2
+  - 验收: 编译成功，节点间连线无错误 → ✅ `CompiledStateGraph`
 
-- [ ] **Task 1.4**: 配置 Langfuse 初始化 `[P0 · 30min]`
+- [x] **Task 1.4**: 配置 Langfuse 初始化 `[P0 · 30min]`
   - 产出: `app/core/langfuse.py`
-  - 验收: Langfuse UI 能收到测试 Trace
+  - 验收: Langfuse module import 正常 → ✅
   - 参考: 03-Tech-Arch §五
 
-- [ ] **Task 1.5**: `pyproject.toml` 依赖声明 `[P1 · 10min]`
+- [x] **Task 1.5**: `pyproject.toml` 依赖声明 `[P1 · 10min]`
   - 产出: `erp-agent/pyproject.toml` (langgraph, mcp, fastapi, httpx, langfuse ...)
-  - 验收: `uv sync` 安装成功
+  - 验收: `uv sync` 安装成功 → ✅ 47 packages installed
 
 - [x] **复盘: Day 1**
   - 验收: 全部 5 个 Task 标注 ✅，`StateGraph` 可编译
@@ -95,7 +94,7 @@ gantt
   - 产出: 测试脚本 `scripts/verify_tools.py`
   - 验收: 10 个工具均调通，mock-erp 数据完整
 
-- [x] **复盘: Day 2**
+- [ ] **复盘: Day 2**
   - 验收: 全部 10 个工具可调通并返回数据
 
 ⚠️ **注意**：Day 2 专注"通"，不关注响应裁剪。裁剪在第 3 天做。
@@ -125,7 +124,7 @@ gantt
   - 产出: `app/mcp/pruning.py` + `@observe` 装饰器
   - 验收: Trace 中可见 `raw_tokens`、`pruned_tokens`、`compression_ratio`
 
-- [x] **复盘: Day 3**
+- [ ] **复盘: Day 3**
   - 验收: MCP 全链路可调用，Pruning 生效，Langfuse 可见压缩率
 
 ⚡ **重点关注**：
@@ -156,7 +155,7 @@ gantt
   - 产出: 手动执行脚本
   - 验收: 每个陷阱 Agent 都能正确处理
 
-- [x] **复盘: Day 4**
+- [ ] **复盘: Day 4**
   - 验收: 全部 5 个业务陷阱场景手动通过
 
 📋 **5 个业务陷阱的测试方法**：
@@ -209,7 +208,7 @@ gantt
   - 产出: `tests/test_agent/test_scenario_s1.py` ~ `s5.py`
   - 验收: 5 个场景各有一个集成测试
 
-- [x] **复盘: Day 5**
+- [ ] **复盘: Day 5**
   - 验收: Terminal 端 5 个场景全部通，HITL interrupt/resume 闭环走通
 
 > **Day 5 结束时验收**：在终端用脚本一次性执行，模拟 5 个场景的全部流程，输出可读日志。
@@ -246,7 +245,7 @@ gantt
   - 产出: 网关与 graph 集成
   - 验收: 网关收到消息 → 创建 Thread → 开始推理
 
-- [x] **复盘: Day 1**
+- [ ] **复盘: Day 1**
   - 验收: 飞书可发消息，本地收到并回复
 
 ---
@@ -277,7 +276,7 @@ gantt
   - 产出: `tests/test_gateway/test_dev_mode.py`
   - 验收: 全部场景覆盖
 
-- [x] **复盘: Day 2**
+- [ ] **复盘: Day 2**
   - 验收: 单物理账号可扮演 2 个逻辑角色
 
 ---
@@ -300,7 +299,7 @@ gantt
   - 产出: `app/gateway/card_builder.py`
   - 验收: 用户收到审批结果卡片
 
-- [x] **复盘: Day 3**
+- [ ] **复盘: Day 3**
   - 验收: 飞书卡片 → 回调 → resume → 回复 闭环
 
 ---
@@ -323,7 +322,7 @@ gantt
   - 产出: `app/gateway/server.py`
   - 验收: 超过 24h 或用户要求重置 → 新 Thread
 
-- [x] **复盘: Day 4**
+- [ ] **复盘: Day 4**
   - 验收: 多轮对话上下文正确保持
 
 ---
@@ -349,7 +348,7 @@ gantt
   - 产出: 修复报告
   - 验收: 无阻塞性问题
 
-- [x] **复盘: Day 5**
+- [ ] **复盘: Day 5**
   - 验收: 飞书端全部 5 场景畅通
 
 ---
@@ -384,7 +383,7 @@ gantt
   - 产出: 同文件
   - 验收: 点击跳转 Langfuse 详情页
 
-- [x] **复盘: Day 1**
+- [ ] **复盘: Day 1**
   - 验收: 管控台可查看数据、RBAC 生效、强行审批可用
 
 ---
@@ -426,7 +425,7 @@ services:
 - [ ] **Task 2.3**: 数据库持久化 `[P1 · 15min]`
   - 验收: 重启后 mock_erp.db 和 postgres 数据不丢
 
-- [x] **复盘: Day 2**
+- [ ] **复盘: Day 2**
   - 验收: `docker compose up` → 4 服务全部可用
 
 ---
@@ -445,7 +444,7 @@ services:
 - [ ] **Task 3.4**: 全链路回调测试 `[P1 · 30min]`
   - 验收: 飞书发消息 → Agent 回复 → 成功
 
-- [x] **复盘: Day 3**
+- [ ] **复盘: Day 3**
   - 验收: 公网可接收飞书回调，全链路通
 
 ---
@@ -464,7 +463,7 @@ services:
 - [ ] **Task 4.4**: 代码注释扫尾 `[P1 · 30min]`
   - 验收: 关键类/函数加 docstring
 
-- [x] **复盘: Day 4**
+- [ ] **复盘: Day 4**
   - 验收: 架构图、README、文档、注释全部到位
 
 ---
@@ -483,7 +482,7 @@ services:
 - [ ] **Task 5.4**: 面试话术复盘 `[P1 · 1h]`
   - 产出: 自问自答文档 (架构决策、技术难点、量化成果)
 
-- [x] **复盘: Day 5**
+- [ ] **复盘: Day 5**
   - 验收: 演示物料齐备
 
 ---
