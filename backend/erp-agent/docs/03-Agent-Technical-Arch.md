@@ -447,8 +447,8 @@ erp-agent/
 │   │   ├── routing.py            # 路由条件函数
 │   │   └── prompts.py            # System Prompt 模板
 │   ├── mcp/
-│   │   ├── server.py             # MCP Server 入口
-│   │   ├── tools.py              # 所有工具实现
+│   │   ├── server.py             # MCP Server 入口 + 所有工具实现
+│   │   ├── client.py             # HTTP Client (httpx → mock-erp)
 │   │   ├── pruning.py            # 响应裁剪逻辑
 │   │   └── interceptor.py        # 越权拦截 + 错误包装
 │   ├── gateway/

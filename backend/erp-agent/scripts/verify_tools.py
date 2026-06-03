@@ -10,8 +10,8 @@ import asyncio
 import json
 import sys
 
-from app.mcp.server import get, close_client
-from app.mcp.tools import (
+from app.mcp.client import get, close_client
+from app.mcp.server import (
     search_product,
     check_department,
     check_budget,
