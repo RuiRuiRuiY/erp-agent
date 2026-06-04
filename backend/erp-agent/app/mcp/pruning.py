@@ -59,48 +59,55 @@ def prune_get_supplier_pricelist(raw: list) -> list:
 
 
 def prune_simulate_purchase(raw: dict) -> dict:
-    result = {"department_remaining_budget": raw.get("department_remaining_budget")}
+    result: dict = {}
+
+    remaining = raw.get("department_remaining_budget")
+    if remaining is not None:
+        result["remaining_budget"] = remaining
 
     recommended_id = raw.get("recommended_supplier_id")
-    rec_raw = next((q for q in raw.get("all_quotes", []) if q.get("supplier_id") == recommended_id), None)
+    mention = raw.get("recommendation_reason")
+    if mention:
+        result["reason"] = mention
 
-    if rec_raw:
-        result["recommended"] = {
-            "name": rec_raw.get("supplier_name"),
-            "total_amount": rec_raw.get("total_amount"),
-            "lead_time_days": rec_raw.get("default_lead_time_days"),
-            "rating": rec_raw.get("rating"),
-            "details": [
-                {
-                    "product_name": d.get("product_name"),
-                    "quantity": d.get("quantity"),
-                    "unit_price": d.get("unit_price"),
-                    "subtotal": d.get("subtotal"),
-                }
-                for d in rec_raw.get("line_details", [])
-            ],
-        }
-    else:
-        result["recommended"] = None
+    for q in raw.get("all_quotes", []):
+        if q.get("supplier_id") == recommended_id:
+            result["recommended"] = {
+                "name": q.get("supplier_name"),
+                "total": q.get("total_amount"),
+                "lead_time": q.get("default_lead_time_days"),
+                "rating": q.get("rating"),
+                "items": [
+                    {
+                        "name": d.get("product_name"),
+                        "qty": d.get("quantity"),
+                        "price": d.get("unit_price"),
+                        "subtotal": d.get("subtotal"),
+                    }
+                    for d in q.get("line_details", [])
+                ],
+            }
+            break
 
-    result["alternatives"] = [
+    alts = [
         {
             "name": q.get("supplier_name"),
-            "total_amount": q.get("total_amount"),
-            "lead_time_days": q.get("default_lead_time_days"),
+            "total": q.get("total_amount"),
+            "lead_time": q.get("default_lead_time_days"),
             "rating": q.get("rating"),
-            "line_count": len(q.get("line_details", [])),
         }
         for q in raw.get("all_quotes", [])
         if q.get("supplier_id") != recommended_id
     ]
+    if alts:
+        result["alternatives"] = alts
 
-    result["skipped_reasons"] = [
+    skipped = [
         f'{s.get("supplier_name")}: {s.get("reason")}'
         for s in raw.get("skipped_suppliers", [])
     ]
-
-    result["recommendation_reason"] = raw.get("recommendation_reason")
+    if skipped:
+        result["skipped"] = skipped
 
     return result
 

@@ -113,7 +113,7 @@ gantt
   - 产出: `app/mcp/pruning.py`
   - 验收: 每个工具裁剪后结构可用 → ✅ 字段验证通过, 缩减率 25%-61%
 
-- [ ] **Task 3.2**: 特别优化 `simulate_purchase` 的摘要策略 `[P0 · 1h]`
+- [x] **Task 3.2**: 特别优化 `simulate_purchase` 的摘要策略 `[P0 · 1h]`
   - 产出: 裁剪后 simulate 响应 (推荐供应商保留明细，其余摘要)
   - 验收: Token 缩减 > 80%
   - 参考: 03-Tech-Arch §3.2 pruning 伪代码
