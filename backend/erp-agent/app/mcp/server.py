@@ -52,6 +52,7 @@ import json
 from fastmcp import FastMCP
 
 from app.mcp.client import get, post
+from app.mcp.interceptor import require_agent_reasoning, enforce_operator_role
 
 mcp = FastMCP("mcp-erp-server")
 
@@ -124,11 +125,10 @@ async def simulate_purchase(department_id: str, items: list) -> str:
 
 @mcp.tool(description="草拟采购订单（普通流程）")
 async def draft_purchase_order(
-    department_id: str, supplier_id: str, items: list, agent_reasoning: str = ""
+    department_id: str, supplier_id: str, items: list, agent_reasoning: str
 ) -> str:
-    body = {"department_id": department_id, "supplier_id": supplier_id, "items": items}
-    if agent_reasoning:
-        body["agent_reasoning"] = agent_reasoning
+    require_agent_reasoning(agent_reasoning, "draft_purchase_order")
+    body = {"department_id": department_id, "supplier_id": supplier_id, "items": items, "agent_reasoning": agent_reasoning}
     data = await post("/po", body)
     return json.dumps(data, ensure_ascii=False)
 
@@ -139,22 +139,23 @@ async def override_purchase_order(
     supplier_id: str,
     items: list,
     override_token: str,
-    agent_reasoning: str = "",
+    agent_reasoning: str,
 ) -> str:
+    require_agent_reasoning(agent_reasoning, "override_purchase_order")
     body = {
         "department_id": department_id,
         "supplier_id": supplier_id,
         "items": items,
         "override_token": override_token,
+        "agent_reasoning": agent_reasoning,
     }
-    if agent_reasoning:
-        body["agent_reasoning"] = agent_reasoning
     data = await post("/po/override", body)
     return json.dumps(data, ensure_ascii=False)
 
 
 @mcp.tool(description="流转采购订单状态（如 PENDING→APPROVED, APPROVED→ISSUED）")
-async def transit_po_status(po_id: str, target_status: str, operator_role: str = "agent") -> str:
+async def transit_po_status(po_id: str, target_status: str) -> str:
+    operator_role = enforce_operator_role()
     body = {"target_status": target_status, "operator_role": operator_role}
     data = await post(f"/po/{po_id}/transit", body)
     return json.dumps(data, ensure_ascii=False)
