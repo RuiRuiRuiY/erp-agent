@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+import json
+
+from langfuse import observe
+from opentelemetry import trace
+
+
+def estimate_tokens(data) -> int:
+    if data is None:
+        return 0
+    return len(json.dumps(data, ensure_ascii=False, default=str))
+
 
 def prune_search_product(raw: dict | list) -> dict | list:
     if isinstance(raw, list):
@@ -160,8 +171,26 @@ PRUNERS = {
 }
 
 
+@observe(name="prune", capture_input=False)
 def prune(tool_name: str, raw_response: dict | list) -> dict | list:
     pruner = PRUNERS.get(tool_name)
     if pruner is None:
+        _record_metrics(tool_name, raw_response, raw_response)
         return raw_response
-    return pruner(raw_response)
+    result = pruner(raw_response)
+    _record_metrics(tool_name, raw_response, result)
+    return result
+
+
+def _record_metrics(tool_name: str, raw: dict | list, pruned: dict | list) -> None:
+    try:
+        raw_t = estimate_tokens(raw)
+        pruned_t = estimate_tokens(pruned)
+        ratio = round((1 - pruned_t / raw_t) * 100, 1) if raw_t > 0 else 0.0
+        span = trace.get_current_span()
+        span.set_attribute("tool_name", tool_name)
+        span.set_attribute("raw_tokens", raw_t)
+        span.set_attribute("pruned_tokens", pruned_t)
+        span.set_attribute("compression_ratio", ratio)
+    except Exception:
+        pass
