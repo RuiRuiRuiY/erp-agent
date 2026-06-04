@@ -45,7 +45,7 @@
   - 查询所有商品目录及当前可用库存。
   - 查询指定部门的当前剩余预算。
   - 创建**草稿状态 (DRAFT)** 的采购单（此时系统会预扣库存，但不扣减实际预算）。
-  - 将草稿订单**提交审批 (Submit for Approval)**，状态变更为 `PENDING_APPROVAL`。
+  - 将草稿订单**提交审批 (Submit for Approval)**，状态变更为 `PENDING`。
 
 - 没有的权限 (Write & Approve - 需人工介入)
 
@@ -143,9 +143,11 @@
 订单状态只能按照以下有向图流转，API 必须拒绝任何非法的状态跃迁。
 
 ```text
-[DRAFT] ──(提交审批)──> [PENDING_APPROVAL] ──(人工批准)──> [APPROVED] ──(发货/履约)──> [FULFILLED]
-                          │                                    │
-                          └──(人工拒绝)──> [REJECTED]          └──(取消)──> [CANCELLED]
+                        ┌──(拒绝)──> [REJECTED] ──(重新起草)──> [DRAFT]
+                        │
+[DRAFT] ──(提交审批)──> [PENDING] ──(批准)──> [APPROVED] ──(下单)──> [ORDERED] ──(发货)──> [SHIPPED] ──(收货)──> [RECEIVED]
+                        │                    │                    │
+                        └──(取消)──> [CANCELLED]  └──(取消)──> [CANCELLED]  └──(取消)──> [CANCELLED]
 ```
 
 - **非法操作示例**：Agent 试图调用 `update_order_status` 将 `DRAFT` 直接改为 `APPROVED`。
@@ -154,7 +156,7 @@
 ### 5.3 事务一致性约束 (Transaction)
 
 - **创建订单时**：必须在同一个数据库事务中完成：① 生成订单记录 -> ② 锁定库存（`locked_qty += qty`, `available_qty -= qty`）。任何一步失败，全部回滚。
-- **提交审批时**：必须在同一个事务中完成：① 状态改为 `PENDING_APPROVAL` -> ② 冻结部门预算（`frozen_budget += amount`）-> ③ 同时锁定库存已在创建时完成，此时保持锁定。
+- **提交审批时**：必须在同一个事务中完成：① 状态改为 `PENDING` -> ② 重新校验预算与库存是否仍充足（预算冻结和库存锁定已在创建 DRAFT 时完成）-> ③ 锁定库存保持锁定。
 - **批准订单时**：必须在同一个事务中完成：① 状态改为 `APPROVED` -> ② 扣减部门预算（`used_budget += amount`, `frozen_budget -= amount`）-> ③ 消耗库存（`locked_qty -= qty`, `total_qty -= qty`）。
 
 ## 6. 验收标准 (Acceptance Criteria for Agent)

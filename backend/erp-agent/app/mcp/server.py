@@ -49,7 +49,7 @@ transit_po_status   POST    /api/v1/po/{po_id}/transit            path: po_id,  
 """
 import json
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from app.mcp.client import get, post
 

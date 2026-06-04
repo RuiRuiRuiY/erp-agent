@@ -35,7 +35,7 @@
 
    - **规则 1（库存校验）**：创建订单时，采购数量不能大于“可用库存”。
    - **规则 2（预算校验）**：订单总金额不能大于部门“剩余预算”。
-   - **规则 3（状态机）**：订单状态只能按 `DRAFT` -> `PENDING_APPROVAL` -> `APPROVED` / `REJECTED` 流转，严禁越级（如直接把 DRAFT 改为 APPROVED）。
+   - **规则 3（状态机）**：订单状态只能按 `DRAFT` -> `PENDING` -> `APPROVED` / `REJECTED` 流转，严禁越级（如直接把 DRAFT 改为 APPROVED）。
 
 ------
 
@@ -64,7 +64,7 @@
 明确定义 `OrderStatus` 枚举：
 
 - `DRAFT` (草稿：Agent 刚创建)
-- `PENDING_APPROVAL` (待审批：Agent 提交审核)
+- `PENDING` (待审批：Agent 提交审核)
 - `APPROVED` (已批准：人工或审批流通过)
 - `REJECTED` (已拒绝)
 - `FULFILLED` (已履约)
@@ -101,7 +101,7 @@ app = FastAPI(
 # 1. 定义严格的枚举 (防止 Agent 幻觉)
 class OrderStatus(str, Enum):
     DRAFT = "DRAFT"
-    PENDING_APPROVAL = "PENDING_APPROVAL"
+    PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
 

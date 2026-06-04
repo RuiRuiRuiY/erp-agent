@@ -66,7 +66,7 @@ gantt
   - 参考: 03-Tech-Arch §五
 
 - [x] **Task 1.5**: `pyproject.toml` 依赖声明 `[P1 · 10min]`
-  - 产出: `erp-agent/pyproject.toml` (langgraph, mcp, fastapi, httpx, langfuse ...)
+  - 产出: `erp-agent/pyproject.toml` (fastmcp, langchain-mcp-adapters, langgraph, fastapi, httpx, langfuse ...)
   - 验收: `uv sync` 安装成功 → ✅ 47 packages installed
 
 - [x] **复盘: Day 1**
@@ -94,6 +94,11 @@ gantt
 - [x] **Task 2.4**: 单独验证每个工具在终端的手动调用 `[P1 · 30min]`
   - 产出: 测试脚本 `scripts/verify_tools.py`
   - 验收: 10 个工具均调通，mock-erp 数据完整
+
+- [ ] **Task 2.5**: 接入 MultiServerMCPClient 到 LangGraph `[P0 · 40min]`
+  - 产出: `app/agent/mcp_client.py` (MultiServerMCPClient 初始化 + get_tools() 封装)
+  - 验收: `client.get_tools()` 返回 10 个 LangChain 兼容工具 → 注入 ToolNode 编译通过
+  - 参考: langchain-mcp-adapters README, 03-Tech-Arch §3.1 架构图
 
 - [x] **复盘: Day 2**
   - 验收: 全部 10 个工具可调通并返回数据

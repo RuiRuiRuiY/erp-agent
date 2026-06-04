@@ -2,7 +2,7 @@
 
 **文档版本**：V6.0 (全场景覆盖与行为规范确权版)
 **项目阶段**：Week 2 - Week 4 实施期
-**核心依赖**：LangGraph, MCP (modelcontextprotocol), FastAPI, SQLite (WAL), PostgreSQL, 飞书开放平台, SQLAdmin, Claude API / GPT-4o
+**核心依赖**：LangGraph, FastMCP + langchain-mcp-adapters, FastAPI, SQLite (WAL), PostgreSQL, 飞书开放平台, SQLAdmin, Claude API / GPT-4o
 
 ------
 
@@ -32,7 +32,7 @@
 | ---------- | ----------------- | ------------------------------------- | ------------------------------------------------------------ |
 | **触达层** | 飞书网关          | FastAPI + `BackgroundTasks`           | 接收 Webhook，利用 FastAPI 原生后台任务实现**内存级异步**（防超时）；发送文本/结果卡片；实现 Dev Mode 身份劫持。 |
 | **大脑层** | LangGraph Server  | Docker + **PostgreSQL**               | 运行 StateGraph，原生支持 `interrupt` 断点挂起；**PostgreSQL 作为 Checkpointer** 存储 State 快照，支撑跨天审批流恢复与复杂事务控制。 |
-| **工具层** | MCP Server        | Python + `mcp` SDK                    | 拦截 Mock-ERP 响应，执行 Response Pruning（数据裁剪），硬编码拦截越权操作。 |
+| **工具层** | MCP Server        | Python + FastMCP                      | 拦截 Mock-ERP 响应，执行 Response Pruning（数据裁剪），硬编码拦截越权操作。 |
 | **底座层** | Mock-ERP & 管控台 | FastAPI + **SQLite (WAL)** + SQLAdmin | 提供核心交易 API；**SQLite 开启 WAL 模式保障并发读写**，实现业务库零配置与轻量级；通过 SQLAdmin 构建带视图级 RBAC 的管理后台。 |
 | **观测层** | 全链路追踪        | Langfuse                              | Day 0 接入，追踪 LLM 思考、Tool 调用耗时及 Token 消耗，提供单轨开发下的数据对比支撑。 |
 

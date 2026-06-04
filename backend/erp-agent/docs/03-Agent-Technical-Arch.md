@@ -143,31 +143,47 @@ class AgentState(TypedDict):
 
 ## 三、MCP Server 结构
 
+### 3.0 MCP vs 传统 Function Calling
+
+选择 MCP 而非 LLM 原生的 function calling（如 OpenAI `tools` 参数），核心考量：
+
+| 维度 | 传统 Function Calling | MCP Server（本项目的选择） |
+|------|----------------------|--------------------------|
+| 工具定义位置 | 混在 Agent 代码中（`@tool` 装饰器 或 OpenAI `tools` 参数） | 独立进程，基于 `FastMCP` + `@mcp.tool` 装饰器，通过 `langchain-mcp-adapters` 的 `MultiServerMCPClient` 连接 |
+| 调用方式 | Agent 直调 Python 函数（内存内） | Agent → `MultiServerMCPClient` → stdio/HTTP → FastMCP Server |
+| 部署耦合 | 工具与 Agent 同进程，改工具需重新部署 Agent | MCP Server 可独立部署/更新，Agent 无需重启 |
+| 协议标准 | 无统一协议，绑定特定 LLM 厂商 | JSON-RPC 2.0 标准化协议，任何 MCP Client 都可复用 |
+| 工具复用 | 只服务于当前 Agent | 同一套工具可同时被 Claude Desktop、VS Code、LangGraph Agent 等消费 |
+| 安全边界 | 工具代码与 Agent 共享内存空间 | 进程隔离 + 拦截器矩阵 + `operator_role` 硬编码 |
+| 工程复杂度 | 低（函数定义即可） | 高（需维护 MCP Server 进程、stdio 传输、错误包装） |
+| 面试展示价值 | "我用了 function calling"（常规操作） | "我用了 MCP Server 做工具层解耦 + 进程隔离 + 多 Client 复用"（架构亮点） |
+
+**结论**：本项目的 10 个工具都是 ERP 业务工具（搜索、预算、报价、建单），天然适合独立部署。MCP 的进程隔离架构也让越权拦截（`operator_role`、`override_token`）有了清晰的实施位置——在 MCP Server 层做，Agent 层不需要碰。
+
 ### 3.1 架构
 
 ```
 ┌─────────────────────────────────────────────┐
 │              LangGraph Agent                 │
-│  (通过 MCP Client 调用工具)                    │
+│  (app/agent/mcp_client.py:                    │
+│   MultiServerMCPClient → get_tools())         │
 └─────────────────┬───────────────────────────┘
-                  │ MCP 协议 (JSON-RPC)
+                  │ MCP 协议 (JSON-RPC over stdio/HTTP)
 ┌─────────────────▼───────────────────────────┐
-│              MCP Server                      │
+│           FastMCP Server                     │
+│  (app/mcp/server.py: @mcp.tool x 10)         │
 │  ┌─────────────────────────────────────┐     │
-│  │  Tool Handlers                      │     │
-│  │  - 参数校验                         │     │
-│  │  - 响应 Pruning (摘要化/裁剪)         │     │
-│  │  - 越权拦截 (operator_role 硬编码)    │     │
-│  │  - agent_reasoning 强制校验          │     │
+│  │  工具函数 (内部调用)                  │     │
+│  │  - pruning.py: 响应裁剪               │     │
+│  │  - interceptor.py: 越权拦截+错误包装   │     │
+│  │  - client.py: httpx → Mock-ERP       │     │
 │  └─────────────────────────────────────┘     │
-│  ┌─────────────────────────────────────┐     │
-│  │  Error Interceptor                  │     │
-│  │  - 捕获 mock-erp 结构化错误          │     │
-│  │  - 提取 agent_suggestion            │     │
-│  │  - 统一包装为 Agent 友好格式         │     │
-│  └─────────────────────────────────────┘     │
+├──────────────────────────────────────────────┤
+│  ┌─ 可被其他 MCP Client 复用 ─────────────┐   │
+│  │  Claude Desktop / VS Code / 其他 Agent │   │
+│  └────────────────────────────────────────┘   │
 └─────────────────┬───────────────────────────┘
-                  │ HTTP
+                  │ HTTP REST
 ┌─────────────────▼───────────────────────────┐
 │         Mock-ERP (FastAPI + SQLite)           │
 │  /api/v1/products, /pricing/simulate, /po... │
@@ -175,6 +191,8 @@ class AgentState(TypedDict):
 ```
 
 ### 3.2 Pruning 实现策略
+
+Pruning 在 `@mcp.tool` 函数体内调用 `pruning.py` 的工具函数执行，而非外部 wrapper。每个工具函数先调用 `client.py` 获取原始响应，再调用对应的 prune 函数裁剪后返回。
 
 ```python
 # MCP 响应裁剪伪代码
@@ -334,26 +352,20 @@ Trace: session_id (飞书会话) / thread_id (LangGraph 线程)
 ### 5.2 关键观测指标
 
 ```python
-# 在每个 MCP tool call 处埋点
+# FastMCP 工具函数内直接埋点
 from langfuse.decorators import observe
+from app.mcp.client import erp_client
+from app.mcp.pruning import prune_simulate_response
 
-@observe(name="mcp_call", capture_input=True, capture_output=True)
-async def call_mcp_tool(tool_name: str, args: dict) -> dict:
-    raw_response = await http_client.post(f"{ERP_BASE}/api/v1/{endpoint}", json=args)
-    raw_tokens = estimate_tokens(raw_response)
-
-    pruned = prune_response(tool_name, raw_response)
-    pruned_tokens = estimate_tokens(pruned)
-
-    # Langfuse 自定义指标
-    observation = langfuse.observation(
-        name=f"pruning_{tool_name}",
-        metadata={
-            "raw_tokens": raw_tokens,
-            "pruned_tokens": pruned_tokens,
-            "compression_ratio": f"{(1 - pruned_tokens/raw_tokens) * 100:.1f}%",
-        }
-    )
+@observe(name="simulate_purchase", capture_input=True, capture_output=True)
+@mcp.tool
+async def simulate_purchase(product_id: str, quantity: int) -> dict:
+    """试算采购价格与阶梯报价"""
+    raw = await erp_client.post("/api/v1/pricing/simulate", json={
+        "product_id": product_id, "quantity": quantity
+    })
+    # @observe 自动记录 raw 和 pruned 的 token 消耗
+    pruned = prune_simulate_response(raw)
     return pruned
 ```
 
