@@ -1,5 +1,5 @@
 """
-ERP-Agent MCP Server
+mcp-erp-server
 
 MCP Tool → Mock-ERP API 映射清单 (共 13 端点 → 10 个工具)
 
@@ -53,7 +53,7 @@ from fastmcp import FastMCP
 
 from app.mcp.client import get, post
 
-mcp = FastMCP("erp-agent")
+mcp = FastMCP("mcp-erp-server")
 
 
 @mcp.tool(description="搜索商品列表（按关键词 q）或查单个商品详情（product_id）")

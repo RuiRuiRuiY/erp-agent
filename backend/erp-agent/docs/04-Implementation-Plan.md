@@ -95,13 +95,13 @@ gantt
   - 产出: 测试脚本 `scripts/verify_tools.py`
   - 验收: 10 个工具均调通，mock-erp 数据完整
 
-- [ ] **Task 2.5**: 接入 MultiServerMCPClient 到 LangGraph `[P0 · 40min]`
+- [x] **Task 2.5**: 接入 MultiServerMCPClient 到 LangGraph `[P0 · 40min]`
   - 产出: `app/agent/mcp_client.py` (MultiServerMCPClient 初始化 + get_tools() 封装)
-  - 验收: `client.get_tools()` 返回 10 个 LangChain 兼容工具 → 注入 ToolNode 编译通过
+  - 验收: `client.get_tools()` 返回 10 个 LangChain 兼容工具 → 注入 ToolNode 编译通过 → ✅
   - 参考: langchain-mcp-adapters README, 03-Tech-Arch §3.1 架构图
 
 - [x] **复盘: Day 2**
-  - 验收: 全部 10 个工具可调通并返回数据
+  - 验收: 全部 10 个工具可调通并返回数据 → ✅ Task 2.5 集成验证通过
 
 ⚠️ **注意**：Day 2 专注"通"，不关注响应裁剪。裁剪在第 3 天做。
 
@@ -109,9 +109,9 @@ gantt
 
 ### Day 3: MCP Server + Response Pruning
 
-- [ ] **Task 3.1**: 实现 10 个工具的 Pruning 函数 `[P0 · 1.5h]`
+- [x] **Task 3.1**: 实现 10 个工具的 Pruning 函数 `[P0 · 1.5h]`
   - 产出: `app/mcp/pruning.py`
-  - 验收: 每个工具裁剪后结构可用
+  - 验收: 每个工具裁剪后结构可用 → ✅ 字段验证通过, 缩减率 25%-61%
 
 - [ ] **Task 3.2**: 特别优化 `simulate_purchase` 的摘要策略 `[P0 · 1h]`
   - 产出: 裁剪后 simulate 响应 (推荐供应商保留明细，其余摘要)
