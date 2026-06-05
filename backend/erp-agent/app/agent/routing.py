@@ -4,7 +4,13 @@ from app.agent.state import AgentState
 
 
 def route_after_tools(state: AgentState) -> str:
-    """检查工具返回结果是否含业务错误，路由到对应节点。"""
+    """检查工具返回结果，路由到对应节点：
+
+    - 业务错误 → stock_error / 其他错误节点
+    - simulate_purchase 有 all_quotes → tier_suggest（筛选价格阶梯）
+    - check_budget available < 0 → budget_check_node
+    - 默认 → call_model
+    """
     msgs = state.get("messages", [])
     if not msgs:
         return "call_model"
@@ -14,10 +20,22 @@ def route_after_tools(state: AgentState) -> str:
     if isinstance(content, str) and content.strip().startswith("{"):
         try:
             data = json.loads(content)
-            if isinstance(data, dict) and data.get("_error"):
-                error_code = data.get("error_code", "")
-                if error_code == "INSUFFICIENT_STOCK":
-                    return "stock_error"
+            if isinstance(data, dict):
+                # 业务错误优先
+                if data.get("_error"):
+                    error_code = data.get("error_code", "")
+                    if error_code == "INSUFFICIENT_STOCK":
+                        return "stock_error"
+                    return "call_model"
+
+                # simulate_purchase 结果 → 检查阶梯差价
+                if data.get("all_quotes"):
+                    return "tier_suggest"
+
+                # check_budget 结果 → 检查预算透支
+                if data.get("department_id") is not None and "available" in data:
+                    if data["available"] < 0:
+                        return "budget_check"
         except (json.JSONDecodeError, AttributeError):
             pass
 

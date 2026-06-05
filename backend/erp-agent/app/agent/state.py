@@ -31,6 +31,8 @@ class AgentState(TypedDict):
     operator_role: str
     pending_approval_type: str | None
 
+    tier_suggestion: str | None
+
     error_context: dict | None
     recovery_attempted: bool
     recovery_path: str | None

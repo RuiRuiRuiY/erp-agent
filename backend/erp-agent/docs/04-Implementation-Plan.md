@@ -141,7 +141,7 @@ gantt
 
 ### Day 4: 异常自愈 + 业务陷阱
 
-- [ ] **Task 4.1**: 实现 `stock_error` 节点 `[P0 · 1h]`
+- [x] **Task 4.1**: 实现 `stock_error` 节点 `[P0 · 1h]`
   - 产出: `app/agent/nodes.py` 中 stock_error 函数
   - 验收: 解析 `INSUFFICIENT_STOCK` → 生成替代方案 → 路由到正确方向
 
