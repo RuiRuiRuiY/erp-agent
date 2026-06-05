@@ -1,10 +1,37 @@
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
+from psycopg import Connection
 
 from app.agent.state import AgentState
 from app.agent.nodes import budget_check, hitl_gate, override_po, resume_cleanup, stock_error, tier_suggest, transit_to_pending
 from app.agent.routing import route_after_tools
+from app.core.config import settings
+
+_checkpointer = None
+
+
+def get_checkpointer() -> MemorySaver | PostgresSaver:
+    """创建持久化 checkpointer（PostgreSQL），无配置或连接失败时降级为 MemorySaver。"""
+    global _checkpointer
+    if _checkpointer is not None:
+        return _checkpointer
+    if not settings.DATABASE_URL:
+        _checkpointer = MemorySaver()
+        return _checkpointer
+    try:
+        conn = Connection.connect(
+            settings.DATABASE_URL,
+            autocommit=True,
+            prepare_threshold=0,
+        )
+        cp = PostgresSaver(conn)
+        cp.setup()
+        _checkpointer = cp
+    except Exception:
+        _checkpointer = MemorySaver()
+    return _checkpointer
 
 
 def call_model(state: AgentState) -> dict:
@@ -57,7 +84,7 @@ def compile_graph_with_tools(tools: list) -> StateGraph:
     workflow.add_edge("transit_to_pending", "resume_cleanup")
     workflow.add_edge("resume_cleanup", "__end__")
 
-    return workflow.compile(checkpointer=MemorySaver())
+    return workflow.compile(checkpointer=get_checkpointer())
 
 
 workflow = StateGraph(AgentState)
@@ -98,4 +125,4 @@ workflow.add_conditional_edges(
 workflow.add_edge("transit_to_pending", "resume_cleanup")
 workflow.add_edge("resume_cleanup", "__end__")
 
-graph = workflow.compile(checkpointer=MemorySaver())
+graph = workflow.compile(checkpointer=get_checkpointer())

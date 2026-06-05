@@ -1,0 +1,24 @@
+services:
+  # 服务名称：我们叫它 postgres
+  postgres:
+    image: postgres:16-alpine  # 1. 去云端超市下载 16 版本的 postgres 镜像（alpine代表精简版，体积更小）
+    container_name: my_pg_db   # 2. 给运行起来的容器起个好听的名字，方便以后管理
+    
+    # 3. 环境变量：相当于在数据库刚出生时，给它强行塞入的“初始设置”
+    environment:
+      POSTGRES_USER: admin       # 设置默认的超级管理员用户名
+      POSTGRES_PASSWORD: ${DB_PASSWORD}  # 设置管理员密码（⚠️注意：生产环境千万别用这么简单的密码），从 .env 文件读取
+      POSTGRES_DB: erp_agent_pg  # 顺手帮你创建一个名叫 erp_agent_pg 的初始数据库
+      TZ: Asia/Shanghai          # 设置时区，这样数据库中的时间，就跟 Windows 显示的时间一致了
+    
+    # 4. 端口映射：把容器内部的 5432 端口，暴露给你 Windows 电脑的 5432 端口
+    ports:
+      - "5432:5432"
+      
+    # 5. 挂载数据卷（最重要的一步！）：给数据库插上“U盘”
+    volumes:
+      - pg_data:/var/lib/postgresql/data 
+
+# 6. 声明数据卷：告诉 Docker，上面用到的那个叫 pg_data 的“U盘”，请你在底层帮我创建并保管好
+volumes:
+  pg_data:
