@@ -118,20 +118,20 @@ gantt
   - 验收: Token 缩减 > 80%
   - 参考: 03-Tech-Arch §3.2 pruning 伪代码
 
-- [ ] **Task 3.3**: 实现 `agent_reasoning` 强制校验 `[P0 · 30min]`
+- [x] **Task 3.3**: 实现 `agent_reasoning` 强制校验 `[P0 · 30min]`
   - 产出: `app/mcp/interceptor.py`
   - 验收: 空 reasoning 或长度 < 20 被拦截
 
-- [ ] **Task 3.4**: 实现 `operator_role` 硬编码 `[P0 · 30min]`
+- [x] **Task 3.4**: 实现 `operator_role` 硬编码 `[P0 · 30min]`
   - 产出: 同上文件，transit_po_status 拦截
   - 验收: LLM 无法操控该参数
 
-- [ ] **Task 3.5**: Langfuse 埋点：记录裁剪前后 Token `[P1 · 40min]`
+- [x] **Task 3.5**: Langfuse 埋点：记录裁剪前后 Token `[P1 · 40min]`
   - 产出: `app/mcp/pruning.py` + `@observe` 装饰器
   - 验收: Trace 中可见 `raw_tokens`、`pruned_tokens`、`compression_ratio`
 
-- [ ] **复盘: Day 3**
-  - 验收: MCP 全链路可调用，Pruning 生效，Langfuse 可见压缩率
+- [x] **复盘: Day 3**
+  - 验收: MCP 全链路可调用，Pruning 生效，Langfuse 可见压缩率 → ✅ 10 工具 MCP 集成通过, 10 工具 Pruning 字段验证+Token缩减通过, `@observe` 埋入 OTel span attributes
 
 ⚡ **重点关注**：
 - `simulate_purchase` 的裁剪：推荐供应商保留明细，其他供应商仅保留摘要（总价 + 交期 + 评分 + 明细行数）

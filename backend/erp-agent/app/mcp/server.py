@@ -52,12 +52,13 @@ import json
 from fastmcp import FastMCP
 
 from app.mcp.client import get, post
-from app.mcp.interceptor import require_agent_reasoning, enforce_operator_role
+from app.mcp.interceptor import require_agent_reasoning, enforce_operator_role, catch_erp_error
 
 mcp = FastMCP("mcp-erp-server")
 
 
 @mcp.tool(description="搜索商品列表（按关键词 q）或查单个商品详情（product_id）")
+@catch_erp_error
 async def search_product(
     q: str = "",
     product_id: str = "",
@@ -75,6 +76,7 @@ async def search_product(
 
 
 @mcp.tool(description="查询部门列表或单个部门详情")
+@catch_erp_error
 async def check_department(department_id: str = "", skip: int = 0, limit: int = 100) -> str:
     if department_id:
         data = await get(f"/departments/{department_id}")
@@ -84,6 +86,7 @@ async def check_department(department_id: str = "", skip: int = 0, limit: int = 
 
 
 @mcp.tool(description="查询部门预算（含 available 计算字段）")
+@catch_erp_error
 async def check_budget(department_id: str, fiscal_year: int | None = None) -> str:
     params = {}
     if fiscal_year is not None:
@@ -93,12 +96,14 @@ async def check_budget(department_id: str, fiscal_year: int | None = None) -> st
 
 
 @mcp.tool(description="查询商品库存（含 available_qty 计算字段）")
+@catch_erp_error
 async def check_inventory(product_id: str) -> str:
     data = await get(f"/inventory/{product_id}")
     return json.dumps(data, ensure_ascii=False)
 
 
 @mcp.tool(description="列出供应商或查单个供应商详情")
+@catch_erp_error
 async def list_suppliers(supplier_id: str = "", skip: int = 0, limit: int = 100) -> str:
     if supplier_id:
         data = await get(f"/suppliers/{supplier_id}")
@@ -108,6 +113,7 @@ async def list_suppliers(supplier_id: str = "", skip: int = 0, limit: int = 100)
 
 
 @mcp.tool(description="查供应商价目表（可按商品筛选）")
+@catch_erp_error
 async def get_supplier_pricelist(supplier_id: str, product_id: str = "") -> str:
     params = {}
     if product_id:
@@ -117,6 +123,7 @@ async def get_supplier_pricelist(supplier_id: str, product_id: str = "") -> str:
 
 
 @mcp.tool(description="试算采购方案，获取多方报价与推荐供应商")
+@catch_erp_error
 async def simulate_purchase(department_id: str, items: list) -> str:
     body = {"department_id": department_id, "items": items}
     data = await post("/pricing/simulate", body)
@@ -124,6 +131,7 @@ async def simulate_purchase(department_id: str, items: list) -> str:
 
 
 @mcp.tool(description="草拟采购订单（普通流程）")
+@catch_erp_error
 async def draft_purchase_order(
     department_id: str, supplier_id: str, items: list, agent_reasoning: str
 ) -> str:
@@ -134,6 +142,7 @@ async def draft_purchase_order(
 
 
 @mcp.tool(description="越权创建采购订单（需 Override Token）")
+@catch_erp_error
 async def override_purchase_order(
     department_id: str,
     supplier_id: str,
@@ -154,6 +163,7 @@ async def override_purchase_order(
 
 
 @mcp.tool(description="流转采购订单状态（如 PENDING→APPROVED, APPROVED→ISSUED）")
+@catch_erp_error
 async def transit_po_status(po_id: str, target_status: str) -> str:
     operator_role = enforce_operator_role()
     body = {"target_status": target_status, "operator_role": operator_role}
