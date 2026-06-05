@@ -192,21 +192,21 @@ gantt
   - 产出: `app/agent/nodes.py` resume 后处理
   - 验收: 恢复后 AgentState 完整，继续后续流程
 
-- [ ] **Task 5.4**: 终端模拟超预算 → 挂起 → 注入 Token → 恢复 `[P1 · 30min]`
+- [x] **Task 5.4**: 终端模拟超预算 → 挂起 → 注入 Token → 恢复 `[P1 · 30min]`
   - 产出: 手动测试脚本
   - 验收: 全流程通
 
-- [ ] **Task 5.5**: PostgreSQL Checkpointer 配置 `[P1 · 30min]`
+- [x] **Task 5.5**: PostgreSQL Checkpointer 配置 `[P1 · 30min]`
   - 产出: `app/agent/graph.py` 中 PostgresSaver
   - 验收: 连接成功，State 持久化
 
 **下午 — S4 阶梯凑单 + S5 综合寻源**：
 
-- [ ] **Task 5.6**: 补全 S4 阶梯凑单完整流程 `[P0 · 1h]`
+- [x] **Task 5.6**: 补全 S4 阶梯凑单完整流程 `[P0 · 1h]`
   - 产出: 端到端测试
   - 验收: 用户确认/拒绝后走正确分支
 
-- [ ] **Task 5.7**: 补全 S5 综合寻源完整流程 `[P0 · 1h]`
+- [x] **Task 5.7**: 补全 S5 综合寻源完整流程 `[P0 · 1h]`
   - 产出: 端到端测试
   - 验收: 多供应商对比展示正确
 
