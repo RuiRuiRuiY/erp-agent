@@ -21,11 +21,13 @@ def route_after_tools(state: AgentState) -> str:
         try:
             data = json.loads(content)
             if isinstance(data, dict):
-                # 业务错误优先
+                # 业务错误 → 按 action 路由
                 if data.get("_error"):
-                    error_code = data.get("error_code", "")
-                    if error_code == "INSUFFICIENT_STOCK":
+                    action = data.get("action", "inform_user")
+                    if action == "self_heal":
                         return "stock_error"
+                    if action == "request_override":
+                        return "budget_check"
                     return "call_model"
 
                 # simulate_purchase 结果 → 检查阶梯差价
