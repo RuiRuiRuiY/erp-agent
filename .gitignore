@@ -24,6 +24,9 @@ wheels/
 # ruff
 .ruff_cache/
 
+# pytest
+.pytest_cache/
+
 
 # ---------- frontend ----------
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.

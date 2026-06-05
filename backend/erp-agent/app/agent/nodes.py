@@ -4,6 +4,7 @@ from langgraph.types import Command, interrupt
 
 from app.agent.state import AgentState
 from app.mcp.client import get as erp_get
+from app.mcp.server import override_purchase_order, transit_po_status
 
 
 def _extract_error_context(state: AgentState) -> dict:
@@ -213,3 +214,98 @@ def hitl_gate(state: AgentState) -> dict:
         token = token.get("override_token", token)
 
     return {"override_token": token, "pending_approval_type": None}
+
+
+async def override_po(state: AgentState) -> dict:
+    """resume 后调用 override_purchase_order 创建特批采购单。
+
+    从 state 中读取 department_id / selected_supplier_id / cart_items / override_token，
+    调用 MCP override 工具创建特批 PO，将结果写入 state。
+    """
+    override_token = state.get("override_token")
+    dept_id = state.get("department_id")
+    supplier_id = state.get("selected_supplier_id")
+    cart_items = state.get("cart_items", [])
+
+    if not all([override_token, dept_id, supplier_id, cart_items]):
+        return {
+            "messages": [{
+                "role": "assistant",
+                "content": "缺少必要参数（部门/供应商/商品/override_token），无法执行特批建单。",
+            }],
+        }
+
+    items = [
+        {"product_id": item["product_id"], "quantity": item["quantity"]}
+        for item in cart_items
+    ]
+    reasoning = (
+        f"特批采购: department={dept_id}, supplier={supplier_id}, "
+        f"items={json.dumps(items, ensure_ascii=False)}"
+    )
+
+    raw = await override_purchase_order(
+        department_id=dept_id,
+        supplier_id=supplier_id,
+        items=items,
+        override_token=override_token,
+        agent_reasoning=reasoning,
+    )
+    data = json.loads(raw)
+
+    if data.get("_error"):
+        return {
+            "messages": [{
+                "role": "assistant",
+                "content": f"特批建单失败：{data.get('user_message', data.get('message', ''))}",
+            }],
+        }
+
+    po_id = data["id"]
+    msg = (
+        f"特批采购单已创建：{data['po_number']}，金额 ¥{data['total_amount']:.2f}，状态 {data['status']}"
+    )
+
+    return {
+        "po_draft_id": po_id,
+        "po_status": data["status"],
+        "po_supplier_id": supplier_id,
+        "messages": [{"role": "assistant", "content": msg}],
+    }
+
+
+async def transit_to_pending(state: AgentState) -> dict:
+    """将特批 PO 从 DRAFT 流转到 PENDING（提交审批）。
+
+    override 单在 transit 时会跳过预算重校验。
+    """
+    po_id = state.get("po_draft_id")
+    if not po_id:
+        return {
+            "messages": [{
+                "role": "assistant",
+                "content": "缺少 PO ID，无法提交审批。",
+            }],
+        }
+
+    raw = await transit_po_status(po_id=po_id, target_status="PENDING")
+    data = json.loads(raw)
+
+    if data.get("_error"):
+        return {
+            "messages": [{
+                "role": "assistant",
+                "content": f"提交审批失败：{data.get('user_message', data.get('message', ''))}",
+            }],
+        }
+
+    return {
+        "po_status": "PENDING",
+        "messages": [{
+            "role": "assistant",
+            "content": (
+                f"采购单已提交审批，单号: {data['po_number']}。\n"
+                f"当前状态: 待审批。财务主管审批通过后即可下单。"
+            ),
+        }],
+    }
