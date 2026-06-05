@@ -184,11 +184,11 @@ gantt
   - 产出: `app/agent/graph.py` 中 interrupt_before 配置
   - 验收: 预算超标时正确挂起
 
-- [ ] **Task 5.2**: 实现 `override_purchase_order` 工具调用 `[P0 · 30min]`
+- [x] **Task 5.2**: 实现 `override_purchase_order` 工具调用 `[P0 · 30min]`
   - 产出: `app/mcp/tools.py` 中 override 逻辑
   - 验收: 传入 `override_token` 成功建单
 
-- [ ] **Task 5.3**: 实现 resume 后的状态恢复 `[P0 · 40min]`
+- [x] **Task 5.3**: 实现 resume 后的状态恢复 `[P0 · 40min]`
   - 产出: `app/agent/nodes.py` resume 后处理
   - 验收: 恢复后 AgentState 完整，继续后续流程
 

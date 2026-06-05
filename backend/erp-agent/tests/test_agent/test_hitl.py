@@ -2,10 +2,12 @@
 """
 Task 5.1: HITL interrupt/resume 验证
 Task 5.2: override_purchase_order 工具调用与全流程验证
+Task 5.3: resume 后状态恢复 — 清理临时字段，保留业务数据
 
 测试:
   1. budget_check → hitl_gate (interrupt) → resume 注入 override_token
-  2. resume → override_po_node (调用 override_purchase_order) → transit_pending_node (DRAFT→PENDING)
+  2. resume → override_po → transit_to_pending → resume_cleanup
+  3. resume_cleanup 后临时字段被清除，业务字段保留
 """
 import json
 from unittest.mock import patch
@@ -73,9 +75,11 @@ def test_hitl_interrupt_resume():
 
 
 async def test_hitl_override_full_flow():
-    """Task 5.2: 完整 override 流程 — override_po 建单 → transit PENDING
+    """Task 5.2 + Task 5.3: 完整 override 流程 → resume 后状态恢复
 
-    验收标准: 传入 override_token 成功建单
+    验收标准:
+      - 传入 override_token 成功建单 (Task 5.2)
+      - resume_cleanup 后临时字段清除，业务字段保留 (Task 5.3)
     """
     initial = AgentState(
         pending_approval_type="budget",
@@ -85,6 +89,7 @@ async def test_hitl_override_full_flow():
         cart_items=[
             {"product_id": "p003", "product_name": "人体工学椅", "quantity": 10},
         ],
+        tier_suggestion="旧的阶梯建议",
         messages=[ToolMessage(
             content=json.dumps({
                 "_error": True,
@@ -104,7 +109,7 @@ async def test_hitl_override_full_flow():
     assert state.values.get("pending_approval_type") == "budget", "应处于挂起状态"
     assert state.values.get("po_draft_id") is None, "挂起时不应有 PO"
 
-    # ── Step 2: resume → 走完整 override 链路 ──────────────────────
+    # ── Step 2: resume → 走完整 override 链路 + cleanup ───────────
     with (
         patch("app.agent.nodes.override_purchase_order", _mock_override_po),
         patch("app.agent.nodes.transit_po_status", _mock_transit_po),
@@ -117,10 +122,20 @@ async def test_hitl_override_full_flow():
             pass
 
     final = await graph.aget_state(config)
+
+    # ── Task 5.2 验收: 成功建单 ────────────────────────────────────
     assert final.values.get("po_draft_id") == "po-override-001", "应保存特批 PO ID"
     assert final.values.get("po_status") == "PENDING", "PO 应已流转到 PENDING"
-    assert final.values.get("override_token") == "override-secret-2025", "override_token 应保留"
+
+    # ── Task 5.3 验收: 临时字段已清除 ──────────────────────────────
+    assert final.values.get("override_token") is None, "override_token 应被消费"
     assert final.values.get("pending_approval_type") is None, "挂起类型应已清除"
+    assert final.values.get("tier_suggestion") is None, "tier_suggestion 应已清除"
+
+    # ── Task 5.3 验收: 业务字段保留 ────────────────────────────────
+    assert final.values.get("department_id") == "dept_rd", "部门信息应保留"
+    assert final.values.get("selected_supplier_id") == "sup_c", "供应商应保留"
+    assert final.values.get("po_supplier_id") == "sup_c", "PO 供应商应保留"
 
 
 async def test_hitl_override_missing_params():

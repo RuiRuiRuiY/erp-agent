@@ -309,3 +309,38 @@ async def transit_to_pending(state: AgentState) -> dict:
             ),
         }],
     }
+
+
+def resume_cleanup(state: AgentState) -> dict:
+    """恢复后状态清理：清除已被消费的临时字段，保留业务数据。
+
+    清理字段：
+      - override_token     消费后清除，不可重复使用
+      - error_context      错误已处理，不再需要
+      - recovery_attempted 恢复流程已结束
+      - recovery_path      同上
+      - tier_suggestion    过期的阶梯建议
+      - pending_approval_type 已处理完成
+
+    保留字段：
+      - po_draft_id / po_status / po_supplier_id — 当前 PO 信息
+      - department_id / selected_supplier_id / cart_items — 业务上下文
+      - supplier_choice_prompted 等
+    """
+    if not state.get("po_draft_id"):
+        return {}
+
+    msg = (
+        f"特批流程已完成。采购单 #{state.get('po_draft_id', '')} "
+        f"当前状态: {state.get('po_status', '')}。"
+    )
+
+    return {
+        "override_token": None,
+        "error_context": None,
+        "recovery_attempted": False,
+        "recovery_path": None,
+        "tier_suggestion": None,
+        "pending_approval_type": None,
+        "messages": [{"role": "assistant", "content": msg}],
+    }

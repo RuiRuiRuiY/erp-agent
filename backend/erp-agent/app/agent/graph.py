@@ -3,7 +3,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.agent.state import AgentState
-from app.agent.nodes import budget_check, hitl_gate, override_po, stock_error, tier_suggest, transit_to_pending
+from app.agent.nodes import budget_check, hitl_gate, override_po, resume_cleanup, stock_error, tier_suggest, transit_to_pending
 from app.agent.routing import route_after_tools
 
 
@@ -23,6 +23,7 @@ def compile_graph_with_tools(tools: list) -> StateGraph:
     workflow.add_node("hitl_gate", hitl_gate)
     workflow.add_node("override_po", override_po)
     workflow.add_node("transit_to_pending", transit_to_pending)
+    workflow.add_node("resume_cleanup", resume_cleanup)
     workflow.add_edge(START, "call_model")
     workflow.add_conditional_edges("call_model", tools_condition, {"tools": "tools", "__end__": "__end__"})
     workflow.add_conditional_edges(
@@ -53,7 +54,8 @@ def compile_graph_with_tools(tools: list) -> StateGraph:
         "override_po",
         lambda s: "transit_to_pending" if s.get("po_draft_id") else "__end__",
     )
-    workflow.add_edge("transit_to_pending", "__end__")
+    workflow.add_edge("transit_to_pending", "resume_cleanup")
+    workflow.add_edge("resume_cleanup", "__end__")
 
     return workflow.compile(checkpointer=MemorySaver())
 
@@ -66,6 +68,7 @@ workflow.add_node("budget_check", budget_check)
 workflow.add_node("hitl_gate", hitl_gate)
 workflow.add_node("override_po", override_po)
 workflow.add_node("transit_to_pending", transit_to_pending)
+workflow.add_node("resume_cleanup", resume_cleanup)
 workflow.add_edge(START, "entry")
 workflow.add_conditional_edges(
     "entry",
@@ -92,6 +95,7 @@ workflow.add_conditional_edges(
     "override_po",
     lambda s: "transit_to_pending" if s.get("po_draft_id") else "__end__",
 )
-workflow.add_edge("transit_to_pending", "__end__")
+workflow.add_edge("transit_to_pending", "resume_cleanup")
+workflow.add_edge("resume_cleanup", "__end__")
 
 graph = workflow.compile(checkpointer=MemorySaver())
