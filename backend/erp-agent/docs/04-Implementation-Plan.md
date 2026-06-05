@@ -180,7 +180,7 @@ gantt
 
 **上午 — HITL 闭环**：
 
-- [ ] **Task 5.1**: 实现 `hitl_override_gate` interrupt 节点 `[P0 · 1h]`
+- [x] **Task 5.1**: 实现 `hitl_override_gate` interrupt 节点 `[P0 · 1h]`
   - 产出: `app/agent/graph.py` 中 interrupt_before 配置
   - 验收: 预算超标时正确挂起
 
