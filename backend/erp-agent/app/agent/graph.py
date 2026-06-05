@@ -1,8 +1,9 @@
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.agent.state import AgentState
-from app.agent.nodes import stock_error, tier_suggest, budget_check
+from app.agent.nodes import stock_error, tier_suggest, budget_check, hitl_gate
 from app.agent.routing import route_after_tools
 
 
@@ -19,6 +20,7 @@ def compile_graph_with_tools(tools: list) -> StateGraph:
     workflow.add_node("stock_error", stock_error)
     workflow.add_node("tier_suggest", tier_suggest)
     workflow.add_node("budget_check", budget_check)
+    workflow.add_node("hitl_gate", hitl_gate)
     workflow.add_edge(START, "call_model")
     workflow.add_conditional_edges("call_model", tools_condition, {"tools": "tools", "__end__": "__end__"})
     workflow.add_conditional_edges(
@@ -33,9 +35,13 @@ def compile_graph_with_tools(tools: list) -> StateGraph:
     )
     workflow.add_edge("stock_error", "__end__")
     workflow.add_edge("tier_suggest", "__end__")
-    workflow.add_edge("budget_check", "__end__")
+    workflow.add_conditional_edges(
+        "budget_check",
+        lambda s: "hitl_gate" if s.get("pending_approval_type") == "budget" else "__end__",
+    )
+    workflow.add_edge("hitl_gate", "call_model")
 
-    return workflow.compile()
+    return workflow.compile(checkpointer=MemorySaver())
 
 
 workflow = StateGraph(AgentState)
@@ -43,6 +49,7 @@ workflow.add_node("entry", call_model)
 workflow.add_node("stock_error", stock_error)
 workflow.add_node("tier_suggest", tier_suggest)
 workflow.add_node("budget_check", budget_check)
+workflow.add_node("hitl_gate", hitl_gate)
 workflow.add_edge(START, "entry")
 workflow.add_conditional_edges(
     "entry",
@@ -53,5 +60,10 @@ workflow.add_conditional_edges(
         "__end__"
     ),
 )
+workflow.add_conditional_edges(
+    "budget_check",
+    lambda s: "hitl_gate" if s.get("pending_approval_type") == "budget" else "__end__",
+)
+workflow.add_edge("hitl_gate", "__end__")
 
-graph = workflow.compile()
+graph = workflow.compile(checkpointer=MemorySaver())

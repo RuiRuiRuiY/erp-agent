@@ -1,6 +1,6 @@
 import json
 
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 
 from app.agent.state import AgentState
 from app.mcp.client import get as erp_get
@@ -180,6 +180,7 @@ def budget_check(state: AgentState) -> dict:
         available = data.get("available", 0)
         if available >= 0:
             return {}
+
         department_id = data.get("department_id", "")
         fiscal_year = data.get("fiscal_year", "")
         msg = (
@@ -193,3 +194,22 @@ def budget_check(state: AgentState) -> dict:
         }
 
     return {}
+
+
+def hitl_gate(state: AgentState) -> dict:
+    """HITL 审批门：挂起图等待 override_token，恢复后注入 state 继续执行。
+
+    interrupt() 调用后图暂停，resume 时传入 {"override_token": "..."}。
+    """
+    if state.get("override_token"):
+        return {"pending_approval_type": None}
+
+    token = interrupt({
+        "pending_type": state.get("pending_approval_type"),
+        "request": "override_token",
+        "message": "需要财务主管审批（override_token）后才能继续",
+    })
+    if isinstance(token, dict):
+        token = token.get("override_token", token)
+
+    return {"override_token": token, "pending_approval_type": None}
