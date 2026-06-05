@@ -91,8 +91,13 @@ def catch_erp_error(func):
             return await func(*args, **kwargs)
         except ErpApiError as e:
             error_code = e.error_code or "UNKNOWN"
-            context = e.body.get("context", {})
+            context = dict(e.body.get("context", {}))
             suggestion = e.agent_suggestion
+            # BUDGET_INSUFFICIENT error context 金额单位为分，转为元
+            if error_code == "BUDGET_INSUFFICIENT":
+                for k in ("required", "remaining", "deficit"):
+                    if k in context and isinstance(context[k], (int, float)):
+                        context[k] = context[k] / 100.0
             return json.dumps({
                 "_error": True,
                 "error_type": "business",

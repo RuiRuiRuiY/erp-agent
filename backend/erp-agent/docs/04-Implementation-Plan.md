@@ -145,15 +145,15 @@ gantt
   - 产出: `app/agent/nodes.py` 中 stock_error 函数
   - 验收: 解析 `INSUFFICIENT_STOCK` → 生成替代方案 → 路由到正确方向
 
-- [ ] **Task 4.2**: 实现 `tier_suggest` 节点 `[P0 · 1h]`
+- [x] **Task 4.2**: 实现 `tier_suggest` 节点 `[P0 · 1h]`
   - 产出: 同文件中 tier_suggest 函数
   - 验收: 识别阶梯差价 → 生成凑单建议文本 → 保存到 State
 
-- [ ] **Task 4.3**: 实现预算预检路由 `[P0 · 30min]`
+- [x] **Task 4.3**: 实现预算预检路由 `[P0 · 30min]`
   - 产出: `app/agent/routing.py` 中 budget_check 逻辑
   - 验收: `check_budget` 后正确路由到继续 / HITL
 
-- [ ] **Task 4.4**: 处理全部 6 种结构化错误 `[P0 · 1h]`
+- [x] **Task 4.4**: 处理全部 6 种结构化错误 `[P0 · 1h]`
   - 产出: `app/mcp/interceptor.py` 错误映射表
   - 验收: 每种错误类型有对应回复模版
 

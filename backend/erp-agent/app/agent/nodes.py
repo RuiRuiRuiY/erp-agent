@@ -6,9 +6,28 @@ from app.agent.state import AgentState
 from app.mcp.client import get as erp_get
 
 
+def _extract_error_context(state: AgentState) -> dict:
+    """从 state.error_context 或最后一条 tool message 的 context 中提取。"""
+    ctx = state.get("error_context") or {}
+    if ctx:
+        return ctx
+    msgs = state.get("messages", [])
+    if not msgs:
+        return {}
+    last = msgs[-1]
+    content = getattr(last, "content", "")
+    if not isinstance(content, str):
+        return {}
+    try:
+        data = json.loads(content)
+        return data.get("context", {}) if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, AttributeError):
+        return {}
+
+
 def stock_error(state: AgentState) -> dict:
     """处理 INSUFFICIENT_STOCK 错误，生成替代方案。"""
-    ctx = state.get("error_context") or {}
+    ctx = _extract_error_context(state)
     product_id = ctx.get("product_id", "")
     requested = ctx.get("requested", 0)
     available = ctx.get("available", 0)
@@ -116,7 +135,12 @@ async def tier_suggest(state: AgentState) -> dict:
 
 
 def budget_check(state: AgentState) -> dict:
-    """处理预算不足情况，设 pending_approval_type 并产生警告消息。"""
+    """处理预算不足情况，设 pending_approval_type 并产生警告消息。
+
+    支持两种触发方式：
+    - check_budget 返回 available < 0（预算推算透支）
+    - draft_purchase_order 返回 BUDGET_INSUFFICIENT（实际扣预算失败）
+    """
     msgs = state.get("messages", [])
     if not msgs:
         return {}
@@ -127,27 +151,45 @@ def budget_check(state: AgentState) -> dict:
         return {}
 
     try:
-        budget_data = json.loads(content)
+        data = json.loads(content)
     except json.JSONDecodeError:
         return {}
 
-    if not isinstance(budget_data, dict):
+    if not isinstance(data, dict):
         return {}
 
-    available = budget_data.get("available", 0)
-    department_id = budget_data.get("department_id", "")
-    fiscal_year = budget_data.get("fiscal_year", "")
+    # 场景 A: draft_purchase_order 返回 BUDGET_INSUFFICIENT
+    # catch_erp_error 已把 context 金额从分转为元，直接使用
+    if data.get("_error") and data.get("error_code") == "BUDGET_INSUFFICIENT":
+        ctx = data.get("context", {})
+        required = ctx.get("required", 0) or 0
+        remaining = ctx.get("remaining", 0) or 0
+        deficit = ctx.get("deficit", 0) or 0
+        msg = (
+            f"预算不足：采购需 ¥{required:.2f}，部门仅剩 ¥{remaining:.2f}，"
+            f"缺口 ¥{deficit:.2f}。\n"
+            f"需要财务主管审批（override_token）后才能继续。"
+        )
+        return {
+            "pending_approval_type": "budget",
+            "messages": [{"role": "assistant", "content": msg}],
+        }
 
-    if available >= 0:
-        return {}
+    # 场景 B: check_budget 返回 available < 0
+    if "available" in data:
+        available = data.get("available", 0)
+        if available >= 0:
+            return {}
+        department_id = data.get("department_id", "")
+        fiscal_year = data.get("fiscal_year", "")
+        msg = (
+            f"预算警告：部门 [{department_id}] 财年 [{fiscal_year}] "
+            f"可用预算为 ¥{available:.2f}，已出现透支。\n"
+            f"需要财务主管审批（override_token）后才能继续。"
+        )
+        return {
+            "pending_approval_type": "budget",
+            "messages": [{"role": "assistant", "content": msg}],
+        }
 
-    msg = (
-        f"预算警告：部门 [{department_id}] 财年 [{fiscal_year}] "
-        f"可用预算为 ¥{available:.2f}，已出现透支。\n"
-        f"需要财务主管审批（override_token）后才能继续。"
-    )
-
-    return {
-        "pending_approval_type": "budget",
-        "messages": [{"role": "assistant", "content": msg}],
-    }
+    return {}
