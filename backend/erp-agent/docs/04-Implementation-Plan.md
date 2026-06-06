@@ -229,27 +229,43 @@ gantt
 
 **目标**：将 Sprint 1 的大脑接入飞书，解决单人测试多角色的痛点。
 
+> **前置条件**：Sprint 1 Langfuse 集成已自动覆盖 Sprint 2（`graph.astream` 已包装 `CallbackHandler`），网关无需额外改动。
+
 ### Day 1: 极简飞书网关
 
-- [ ] **Task 1.1**: FastAPI 飞书 Webhook 接收端 `[P0 · 40min]`
-  - 产出: `app/gateway/server.py`
-  - 验收: 飞书能 POST 消息到本地
+> **TODO**: Task 0.6 是 Sprint 2 的前提任务。`call_model` 补全后才能跑通生产图链路。
+
+- [x] **Task 0.6**: 补全 `call_model` 节点 — LLM 调用 `[P0 · 1h]`
+  - 产出: `app/agent/nodes.py` 中 call_model 改为真实 LLM 调用（deepseek-v4-pro + System Prompt）
+  - 验收: `compile_graph_with_tools(mcp_tools)` 编译后，用户输入可触发 LLM 调用工具
+  - 依赖: LLM API Key（配在 .env）
+  - 参考: PRD §3.5 (LLM 选型), 03-Tech-Arch §八 (System Prompt 模板)
+
+- [x] **Task 1.1**: FastAPI 飞书 Webhook 接收端 `[P0 · 40min]`
+  - 产出: `app/gateway/server.py`（FastAPI app, uvicorn 端口 8099）
+  - 验收: 飞书能 POST 消息到本地，立刻返回 200
+
+- [x] **Task 1.1.5**: 实现 `feishu_client.py` `[P0 · 40min]`
+  - 产出: `app/gateway/feishu_client.py`
+  - 职责:
+    1. tenant_access_token 获取 + 缓存 + 自动刷新
+    2. `send_text(open_id, text)` — 发纯文本消息
+    3. `send_card(open_id, card_json)` — 发卡片消息
+  - 技术: httpx.AsyncClient，不使用 lark-cli
+  - 验收: token 获取成功，能向飞书用户发送文本/卡片
 
 - [ ] **Task 1.2**: `BackgroundTasks` 内存异步 `[P0 · 20min]`
   - 产出: 同文件，后台任务编排
   - 验收: 立即返回 200，后台处理
 
-- [ ] **Task 1.3**: "思考中"提示文本发送 `[P1 · 20min]`
-  - 产出: `app/gateway/server.py` 中 send_thinking_message
-  - 验收: 飞书看到"正在处理..."
-
-- [ ] **Task 1.4**: 结果 Markdown 卡片发送 `[P1 · 40min]`
-  - 产出: `app/gateway/card_builder.py`
-  - 验收: 飞书收到格式正确的卡片
+- [ ] **Task 1.3**: "思考中"提示文本 + 结果回复 `[P1 · 30min]`
+  - 产出: `app/gateway/server.py` 中 send_thinking_message + 回复用户
+  - 验收: 飞书看到"正在处理..." → 收到结果文本
+  - 注: 先走纯文本，卡片延后到 Day 3
 
 - [ ] **Task 1.5**: LangGraph Thread 创建与调用集成 `[P0 · 30min]`
-  - 产出: 网关与 graph 集成
-  - 验收: 网关收到消息 → 创建 Thread → 开始推理
+  - 产出: 网关 → `compile_graph_with_tools(mcp_tools)` → astream
+  - 验收: 网关收到消息 → 创建 Thread → 开始推理 → 返回结果
 
 - [ ] **复盘: Day 1**
   - 验收: 飞书可发消息，本地收到并回复
@@ -258,13 +274,16 @@ gantt
 
 ### Day 2: Dev Mode 身份劫持
 
-- [ ] **Task 2.1**: DEV_MODE 环境变量支持 `[P0 · 15min]`
-  - 产出: `app/core/config.py`
-  - 验收: 配置开关生效
+- [x] **Task 2.1**: DEV_MODE 环境变量支持 `[P0 · 15min]`
+  - 产出: `app/core/config.py`（字段已存在: `DEV_MODE: bool = False`）
+  - 验收: 配置开关生效 → ✅ Sprint 1 已实现
 
-- [ ] **Task 2.2**: 输入伪装 Middleware `[P0 · 1h]`
+- [ ] **Task 2.2**: 输入伪装 Middleware + `/role` 命令 `[P0 · 1h]`
   - 产出: `app/gateway/auth.py`
-  - 验收: 物理账号 open_id → 逻辑身份 (采购员 Alice)
+  - 职责:
+    1. `/role 采购员` / `/role 财务经理` 命令解析 → 切换当前角色
+    2. 物理账号 open_id → 逻辑身份映射
+  - 验收: 用户发 `/role 财务经理` → 后续操作以该角色身份执行
 
 - [ ] **Task 2.3**: 路由重定向 `[P0 · 40min]`
   - 产出: 同上文件

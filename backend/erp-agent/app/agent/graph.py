@@ -46,10 +46,44 @@ def call_model(state: AgentState) -> dict:
 
 
 def compile_graph_with_tools(tools: list) -> StateGraph:
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import SystemMessage
+    from app.agent.prompts import SYSTEM_PROMPT
+
+    llm = ChatOpenAI(
+        model=settings.OPENAI_MODEL,
+        temperature=0,
+        api_key=settings.OPENAI_API_KEY,
+        base_url=settings.OPENAI_BASE_URL,
+    )
+    llm_with_tools = llm.bind_tools(tools)
+
+    tools_desc = "\n".join(f"- {t.name}: {t.description}" for t in tools if t.description)
+
+    async def _call_model(state: AgentState) -> dict:
+        context_parts = []
+        if state.get("department_id"):
+            context_parts.append(f"部门: {state['department_id']}")
+        if state.get("cart_items"):
+            names = [i.get("product_name", "") for i in state["cart_items"]]
+            context_parts.append(f"商品: {', '.join(names)}")
+        if state.get("selected_supplier_id"):
+            context_parts.append(f"已选供应商: {state['selected_supplier_id']}")
+
+        system = SYSTEM_PROMPT.format(
+            tools=tools_desc,
+            po_status=state.get("po_status") or "新会话",
+            context="; ".join(context_parts) or "新会话",
+        )
+
+        messages = [SystemMessage(content=system), *state["messages"]]
+        response = await llm_with_tools.ainvoke(messages)
+        return {"messages": [response]}
+
     tool_node = ToolNode(tools)
 
     workflow = StateGraph(AgentState)
-    workflow.add_node("call_model", call_model)
+    workflow.add_node("call_model", _call_model)
     workflow.add_node("tools", tool_node)
     workflow.add_node("stock_error", stock_error)
     workflow.add_node("tier_suggest", tier_suggest)

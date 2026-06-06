@@ -8,7 +8,7 @@ wheels/
 *.egg-info
 
 # database
-.db
+*.db
 
 # test
 
@@ -30,6 +30,7 @@ wheels/
 # agent
 .agents
 skills-lock.json
+AGENTS.md
 
 # ---------- frontend ----------
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
