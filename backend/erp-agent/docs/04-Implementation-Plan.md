@@ -210,11 +210,11 @@ gantt
   - 产出: 端到端测试
   - 验收: 多供应商对比展示正确
 
-- [ ] **Task 5.8**: 编写 Week 2 集成测试 `[P1 · 30min]`
+- [x] **Task 5.8**: 编写 Week 2 集成测试 `[P1 · 30min]`
   - 产出: `tests/test_agent/test_scenario_s1.py` ~ `s5.py`
   - 验收: 5 个场景各有一个集成测试
 
-- [ ] **复盘: Day 5**
+- [x] **复盘: Day 5**
   - 验收: Terminal 端 5 个场景全部通，HITL interrupt/resume 闭环走通
 
 > **Day 5 结束时验收**：在终端用脚本一次性执行，模拟 5 个场景的全部流程，输出可读日志。

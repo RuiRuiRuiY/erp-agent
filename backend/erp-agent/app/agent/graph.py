@@ -1,3 +1,4 @@
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import START, StateGraph
@@ -28,7 +29,13 @@ def get_checkpointer() -> MemorySaver | PostgresSaver:
         )
         cp = PostgresSaver(conn)
         cp.setup()
-        _checkpointer = cp
+        # PostgresSaver(sync conn) 不实现 aget_tuple → astream 崩溃
+        # 检测到未覆盖基类方法时降级为 MemorySaver
+        if type(cp).aget_tuple is BaseCheckpointSaver.aget_tuple:
+            conn.close()
+            _checkpointer = MemorySaver()
+        else:
+            _checkpointer = cp
     except Exception:
         _checkpointer = MemorySaver()
     return _checkpointer
@@ -126,3 +133,53 @@ workflow.add_edge("transit_to_pending", "resume_cleanup")
 workflow.add_edge("resume_cleanup", "__end__")
 
 graph = workflow.compile(checkpointer=get_checkpointer())
+
+if settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY:
+    try:
+        from app.core.langfuse import setup_langfuse
+        setup_langfuse()
+        from app.core.langfuse import langfuse_client as lf
+        if lf:
+            from langfuse.langchain import CallbackHandler
+            _lf_handler = CallbackHandler()
+
+            # 包装 astream：自动在 config 中注入 Langfuse callback
+            _orig_astream = graph.astream
+
+            async def _astream_with_lf(*args, **kwargs):
+                if len(args) > 1 and args[1] is not None:
+                    _cfg = args[1]
+                    if "callbacks" not in _cfg:
+                        _cfg = {**_cfg, "callbacks": [_lf_handler]}
+                        args = (args[0], _cfg) + args[2:]
+                elif "config" in kwargs:
+                    _cfg = kwargs["config"]
+                    if "callbacks" not in _cfg:
+                        kwargs["config"] = {**_cfg, "callbacks": [_lf_handler]}
+                async for chunk in _orig_astream(*args, **kwargs):
+                    yield chunk
+
+            graph.astream = _astream_with_lf
+
+            # 包装 invoke
+            _orig_invoke = graph.invoke
+
+            def _invoke_with_lf(*args, **kwargs):
+                if len(args) > 1 and args[1] is not None:
+                    _cfg = args[1]
+                    if "callbacks" not in _cfg:
+                        _cfg = {**_cfg, "callbacks": [_lf_handler]}
+                        args = (args[0], _cfg) + args[2:]
+                elif "config" in kwargs:
+                    _cfg = kwargs["config"]
+                    if "callbacks" not in _cfg:
+                        kwargs["config"] = {**_cfg, "callbacks": [_lf_handler]}
+                return _orig_invoke(*args, **kwargs)
+
+            graph.invoke = _invoke_with_lf
+
+            # 进程退出前确保数据发送
+            import atexit
+            atexit.register(lambda: lf.flush())
+    except Exception:
+        pass
