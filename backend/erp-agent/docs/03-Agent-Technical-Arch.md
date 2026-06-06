@@ -2,7 +2,7 @@
 
 **文档版本**：V1.0
 **对应版本**：PRD V6.0
-**核心组件**：LangGraph, MCP Server, FastAPI (Feishu Gateway), PostgreSQL (Checkpointer)
+**核心组件**：LangGraph, MCP Server, Chainlit, PostgreSQL (Checkpointer)
 
 ---
 
@@ -113,7 +113,7 @@ class AgentState(TypedDict):
     # --- LangGraph 核心 ---
     messages: Annotated[list, add_messages]   # 对话历史
     thread_id: str                            # LangGraph 线程 ID (绑定 Langfuse)
-    session_id: str                           # 飞书群/用户会话 ID
+    session_id: str                           # 用户会话 ID
     next_node: str                            # 当前/下一节点名 (debug & trace)
 
     # --- 业务上下文 ---
@@ -246,83 +246,100 @@ def prune_simulate_response(raw: dict) -> dict:
 
 ---
 
-## 四、Dev Mode 身份劫持序列图
+## 四、Chainlit HITL 集成
+
+### 4.1 架构概览
+
+Chainlit 提供开箱即用的对话式 UI，与 LangGraph 的 `interrupt`/`resume` 机制天然集成：
 
 ```mermaid
 sequenceDiagram
-    participant User as 物理测试账号 (YR)
-    participant GW as 飞书网关 (FastAPI)
+    participant User as 用户 (Chainlit UI)
+    participant CL as Chainlit
     participant Agent as LangGraph Agent
     participant MCP as MCP Server
     participant ERP as Mock-ERP
 
-    Note over User,ERP: DEV_MODE=true
-
-    User->>GW: 发送消息 "买 5 台显示器"
-    GW->>GW: 输入伪装: open_id → 逻辑身份 "采购员 Alice"
-    GW->>Agent: thread_id=xxx, user_role="purchaser"
+    User->>CL: 发送消息 "买 5 台显示器给 IT 部"
+    CL->>Agent: invoke(graph, state)
     Agent->>MCP: search_product / simulate...
     MCP->>ERP: API 调用
     ERP-->>MCP: 响应
     MCP-->>Agent: 裁剪后响应
-    Agent->>GW: 需向 "财务主管 Bob" 发送审批卡片
-    GW->>GW: 路由重定向: Bob → 物理测试账号
-    GW->>GW: 注入标识 "[测试模式: 您正以 Bob 身份查看]"
-    GW->>User: 发送审批卡片 (含伪装标识)
+    Agent->>Agent: check_budget → 预算不足
+    Agent->>Agent: interrupt(hitl_gate) → 挂起
+    Agent-->>CL: 返回挂起状态
+    CL-->>User: AskActionMessage "预算超标，是否申请特批？"
 
-    User->>GW: 点击 "批准"
-    GW->>GW: 反向伪装: 操作者身份替换为 Bob
-    GW->>Agent: resume(thread_id, operator_role="finance_manager", override_token=xxx)
-    Agent->>MCP: transit_po_status(operator_role="finance_manager")
-    MCP-->>ERP: operator_role="finance_manager"
-    ERP-->>MCP: 状态变更成功
+    User->>CL: 点击 "批准"
+    CL->>Agent: Command(resume=True, override_token=xxx)
+    Agent->>MCP: override_purchase_order
+    MCP->>ERP: POST /po/override
+    ERP-->>MCP: PO 创建成功
     MCP-->>Agent: 成功
-    Agent-->>GW: 结果
-    GW-->>User: 回复 "审批通过"
+    Agent-->>CL: 返回最终结果
+    CL-->>User: "特批已通过，采购单已提交"
 ```
 
-### Dev Mode 核心逻辑 (Middleware)
+### 4.2 核心集成模式
 
 ```python
-from fastapi import Request
-import os
+import chainlit as cl
+from langgraph.graph import StateGraph
+from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.types import Command
 
-DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
-PHYSICAL_USER_ID = "ou_xxxx"  # 物理测试账号 open_id
+# 编译图 (带 checkpointer + interrupt)
+checkpointer = PostgresSaver.from_conn_string(DATABASE_URL)
+graph = build_graph().compile(checkpointer=checkpointer, interrupt_before=["hitl_gate"])
 
-# 逻辑角色 → 物理映射 (仅 DEV_MODE 启用时反转)
-ROLE_MAP = {
-    "purchaser": PHYSICAL_USER_ID,   # 采购员 Alice → 物理用户
-    "finance_manager": PHYSICAL_USER_ID,  # 财务主管 Bob → 物理用户
-}
+@cl.on_chat_start
+async def on_start():
+    cl.user_session.set("thread_id", str(uuid4()))
 
-async def dev_mode_middleware(request: Request, call_next):
-    if not DEV_MODE:
-        return await call_next(request)
+@cl.on_message
+async def on_message(message: cl.Message):
+    thread_id = cl.user_session.get("thread_id")
+    config = {"configurable": {"thread_id": thread_id}}
 
-    # 1. 输入伪装: 将物理 open_id 替换为逻辑身份
-    body = await request.json()
-    if body.get("open_id") == PHYSICAL_USER_ID:
-        body["open_id"] = "ou_purchaser_alice"  # 逻辑身份
-        body["user_role"] = "purchaser"
-        request._body = body
+    result = await graph.ainvoke(
+        {"messages": [HumanMessage(content=message.content)]},
+        config
+    )
 
-    response = await call_next(request)
+    # 检查是否触发 HITL
+    if result.get("pending_approval"):
+        action = await cl.AskActionMessage(
+            content=f"预算超标 {result['deficit']} 元，是否申请特批？",
+            actions=[
+                cl.Action(name="approve", label="批准特批"),
+                cl.Action(name="reject", label="拒绝")
+            ]
+        ).send()
 
-    # 2. 路由重定向: 拦截审批卡片目标地址
-    if response.status_code == 200 and "send_card" in str(response.body):
-        target = response.body.get("target_open_id", "")
-        if target in ROLE_MAP:
-            response.body["target_open_id"] = PHYSICAL_USER_ID
-            response.body["test_mode_badge"] = f"[测试模式: 您正以 {target} 身份查看]"
+        if action["name"] == "approve":
+            await graph.ainvoke(Command(resume=True), config)
 
-    # 3. 回调反向伪装: 审批操作者身份替换
-    if request.url.path == "/feishu/callback" and body.get("open_id") == PHYSICAL_USER_ID:
-        callback_role = body.get("callback_role", "finance_manager")
-        request.state.operator_role = callback_role
-        request.state.open_id = f"ou_{callback_role}"
+    await cl.Message(content=result["final_reply"]).send()
+```
 
-    return response
+### 4.3 角色切换机制
+
+通过 Chainlit 命令实现单人多角色测试，无需复杂的身份伪装：
+
+```python
+@cl.on_message
+async def on_message(message: cl.Message):
+    # 角色切换命令
+    if message.content.startswith("/role"):
+        role = message.content.split()[1]
+        cl.user_session.set("operator_role", role)
+        await cl.Message(content=f"已切换到角色: {role}").send()
+        return
+
+    # 正常消息处理...
+    operator_role = cl.user_session.get("operator_role", "agent")
+    # 将 operator_role 注入到 state 中
 ```
 
 ---
@@ -334,7 +351,7 @@ async def dev_mode_middleware(request: Request, call_next):
 每次 Agent 执行作为一个 Trace，内部节点作为 Spans：
 
 ```
-Trace: session_id (飞书会话) / thread_id (LangGraph 线程)
+Trace: session_id (用户会话) / thread_id (LangGraph 线程)
 ├── Span: parse_input           → LLM 调用 (提取意图)
 ├── Span: search_product        → MCP tool call (含裁剪前后 Token 对比)
 ├── Span: check_budget          → MCP tool call
@@ -412,9 +429,9 @@ PostgreSQL 存储的 State 快照包含：
 
 - `thread_id`, `checkpoint_id`, `parent_checkpoint_id` — 版本链
 - `state` — 完整 `AgentState` (JSON 序列化)
-- `metadata` — 包含 `session_id`, `source` (feishu/console), `created_at`
+- `metadata` — 包含 `session_id`, `source` (chainlit/console), `created_at`
 
-**跨天恢复**：用户在飞书上发出采购请求后关闭会话，第二天打开飞书收到审批卡片，点击后通过 `thread_id` 和 `checkpoint_id` 恢复被挂起的 Thread。
+**跨会话恢复**：用户关闭会话后，第二天重新打开 Chainlit，通过 `thread_id` 和 `checkpoint_id` 恢复被挂起的 Thread。
 
 ---
 
@@ -463,15 +480,11 @@ erp-agent/
 │   │   ├── client.py             # HTTP Client (httpx → mock-erp)
 │   │   ├── pruning.py            # 响应裁剪逻辑
 │   │   └── interceptor.py        # 越权拦截 + 错误包装
-│   ├── gateway/
-│   │   ├── server.py             # FastAPI 飞书网关
-│   │   ├── auth.py               # Dev Mode 中间件
-│   │   ├── card_builder.py       # 飞书卡片构造
-│   │   └── callback.py           # 审批回调处理
+│   ├── chainlit_app.py           # Chainlit 入口 + HITL 审批逻辑
 │   ├── dashboard/
 │   │   └── ...                   # SQLAdmin 管控台
 │   └── core/
-│       ├── config.py             # 配置 (DEV_MODE, DB_URL, etc.)
+│       ├── config.py             # 配置 (DB_URL, etc.)
 │       └── langfuse.py           # Langfuse 初始化
 ├── docs/                         # 文档
 ├── tests/
@@ -484,10 +497,11 @@ erp-agent/
 │   ├── test_mcp/
 │   │   ├── test_pruning.py       # 裁剪效果测试
 │   │   └── test_interceptor.py   # 越权拦截测试
-│   └── test_gateway/
-│       └── test_dev_mode.py      # Dev Mode 测试
+│   └── test_chainlit/
+│       └── test_hitl.py          # HITL 审批测试
 ├── scripts/
 │   └── seed.py                   # 测试数据注入
 ├── pyproject.toml
+├── chainlit.md                   # Chainlit 配置
 └── docker-compose.yml
 ```

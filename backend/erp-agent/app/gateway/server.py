@@ -1,23 +1,52 @@
 import json
 import logging
+import uuid
 
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import JSONResponse
+from langchain_core.messages import HumanMessage
 
+from app.core.config import settings
 from app.gateway.feishu_client import feishu
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+_graph = None
+
+
+async def _get_graph():
+    global _graph
+    if _graph is None:
+        from app.agent.graph import compile_graph_with_tools
+        from app.agent.mcp_client import get_mcp_tools
+        tools = await get_mcp_tools()
+        _graph = compile_graph_with_tools(tools)
+    return _graph
+
 
 async def _process_message(open_id: str, text: str, message_id: str) -> None:
     try:
         await feishu.send_text(open_id, "正在处理...")
-        result = f"已收到消息: {text}"
-        await feishu.send_text(open_id, result)
+        g = await _get_graph()
+        thread_id = str(uuid.uuid4())
+        result = await g.ainvoke(
+            {"messages": [HumanMessage(content=text)]},
+            {"configurable": {"thread_id": thread_id}},
+        )
+        msgs = result.get("messages", [])
+        reply = ""
+        for m in reversed(msgs):
+            c = getattr(m, "content", "")
+            if isinstance(c, str) and c.strip():
+                reply = c
+                break
+        if reply:
+            await feishu.send_text(open_id, reply[:2000])
     except Exception:
         logger.exception("process_message failed")
+        await feishu.send_text(open_id, "处理出错，请稍后重试")
 
 
 @app.post("/")

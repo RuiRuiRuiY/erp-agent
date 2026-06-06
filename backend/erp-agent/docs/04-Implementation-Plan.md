@@ -1,6 +1,6 @@
 # ERP-Agent 实施计划 (Offer-Oriented 极限 3 周版)
 
-**文档版本**：V1.1 (Task 可勾选追踪版)
+**文档版本**：V1.2 (Chainlit 架构调整版)
 **对应版本**：PRD V6.0
 **核心原则**：先跑通主线 → 再 enrich 细节 → 永远保持"可演示"状态
 
@@ -22,26 +22,23 @@ gantt
     Day 5 HITL 完整闭环               :w2d5, 2026-06-06, 1d
     Day 5 S4 阶梯凑单 + S5 综合寻源   :w2d5b, 2026-06-06, 1d
 
-    section Week 3: 飞书接入
-    Day 1 飞书网关 + 异步消息          :w3d1, 2026-06-07, 1d
-    Day 2 Dev Mode 身份劫持           :w3d2, 2026-06-08, 1d
-    Day 3 飞书卡片交互 + Thread 唤醒  :w3d3, 2026-06-09, 1d
-    Day 4 上下文管理 + 多轮对话        :w3d4, 2026-06-10, 1d
-    Day 5 全链路联调 + 5 场景验证     :w3d5, 2026-06-11, 1d
+    section Week 3: Chainlit 接入
+    Day 1 Chainlit 基础集成 + HITL    :w3d1, 2026-06-07, 1d
+    Day 2 角色切换 + 全链路联调        :w3d2, 2026-06-08, 1d
+    Day 3 Buffer + Bug 修复           :w3d3, 2026-06-09, 1d
 
     section Week 4: 管控台+部署+包装
     Day 1 SQLAdmin 管控台 + RBAC      :w4d1, 2026-06-12, 1d
     Day 2 Docker Compose 编排         :w4d2, 2026-06-13, 1d
-    Day 3 Cloudflare Tunnels 配置     :w4d3, 2026-06-14, 1d
-    Day 4 架构图 + README + 文档      :w4d4, 2026-06-15, 1d
-    Day 5 录屏 + Langfuse 截图 + 复盘 :w4d5, 2026-06-16, 1d
+    Day 3 架构图 + README + 文档      :w4d3, 2026-06-14, 1d
+    Day 4 录屏 + Langfuse 截图 + 复盘 :w4d4, 2026-06-15, 1d
 ```
 
 ---
 
 ## 🚀 Sprint 1: 核心大脑构建 (Week 2)
 
-**目标**：脱离飞书，在纯 Python 终端中跑通 Agent 调用 ERP 工具的核心逻辑，覆盖全部 5 个场景。
+**目标**：在纯 Python 终端中跑通 Agent 调用 ERP 工具的核心逻辑，覆盖全部 5 个场景。
 
 ### Day 1: 骨架 + AgentState + Langfuse 初始化
 
@@ -225,160 +222,91 @@ gantt
 
 ---
 
-## 🧠 Sprint 2: 业务触达与多角色流转 (Week 3)
+## 🧠 Sprint 2: 业务触达与 HITL 审批 (Week 3)
 
-**目标**：将 Sprint 1 的大脑接入飞书，解决单人测试多角色的痛点。
+**目标**：将 Sprint 1 的大脑接入 Chainlit UI，完成 HITL 审批闭环。
 
-> **前置条件**：Sprint 1 Langfuse 集成已自动覆盖 Sprint 2（`graph.astream` 已包装 `CallbackHandler`），网关无需额外改动。
+> **前置条件**：Sprint 1 Langfuse 集成已自动覆盖 Sprint 2（`graph.astream` 已包装 `CallbackHandler`）。
 
-### Day 1: 极简飞书网关
+### Day 1: Chainlit 基础集成 + HITL
 
 > **TODO**: Task 0.6 是 Sprint 2 的前提任务。`call_model` 补全后才能跑通生产图链路。
 
-- [x] **Task 0.6**: 补全 `call_model` 节点 — LLM 调用 `[P0 · 1h]`
+- [ ] **Task 0.6**: 补全 `call_model` 节点 — LLM 调用 `[P0 · 1h]`
   - 产出: `app/agent/nodes.py` 中 call_model 改为真实 LLM 调用（deepseek-v4-pro + System Prompt）
   - 验收: `compile_graph_with_tools(mcp_tools)` 编译后，用户输入可触发 LLM 调用工具
   - 依赖: LLM API Key（配在 .env）
   - 参考: PRD §3.5 (LLM 选型), 03-Tech-Arch §八 (System Prompt 模板)
 
-- [x] **Task 1.1**: FastAPI 飞书 Webhook 接收端 `[P0 · 40min]`
-  - 产出: `app/gateway/server.py`（FastAPI app, uvicorn 端口 8099）
-  - 验收: 飞书能 POST 消息到本地，立刻返回 200
-
-- [x] **Task 1.1.5**: 实现 `feishu_client.py` `[P0 · 40min]`
-  - 产出: `app/gateway/feishu_client.py`
+- [ ] **Task 1.1**: Chainlit 基础集成 `[P0 · 1h]`
+  - 产出: `app/chainlit_app.py` (Chainlit 入口)
   - 职责:
-    1. tenant_access_token 获取 + 缓存 + 自动刷新
-    2. `send_text(open_id, text)` — 发纯文本消息
-    3. `send_card(open_id, card_json)` — 发卡片消息
-  - 技术: httpx.AsyncClient，不使用 lark-cli
-  - 验收: token 获取成功，能向飞书用户发送文本/卡片
+    1. `@cl.on_chat_start` 初始化 thread_id
+    2. `@cl.on_message` 接收用户消息，调用 LangGraph
+    3. 流式输出结果
+  - 验收: Chainlit 启动，用户可发送消息并收到 Agent 回复
 
-- [ ] **Task 1.2**: `BackgroundTasks` 内存异步 `[P0 · 20min]`
-  - 产出: 同文件，后台任务编排
-  - 验收: 立即返回 200，后台处理
+- [ ] **Task 1.2**: HITL 审批弹窗集成 `[P0 · 1h]`
+  - 产出: 同文件
+  - 职责:
+    1. 检测 Agent 返回的 `pending_approval` 状态
+    2. 调用 `cl.AskActionMessage` 弹出审批确认框
+    3. 用户点击"批准"后调用 `Command(resume=True)` 唤醒 Thread
+  - 验收: 预算超标场景 → 弹窗 → 批准 → resume → 建单成功
 
-- [ ] **Task 1.3**: "思考中"提示文本 + 结果回复 `[P1 · 30min]`
-  - 产出: `app/gateway/server.py` 中 send_thinking_message + 回复用户
-  - 验收: 飞书看到"正在处理..." → 收到结果文本
-  - 注: 先走纯文本，卡片延后到 Day 3
-
-- [ ] **Task 1.5**: LangGraph Thread 创建与调用集成 `[P0 · 30min]`
-  - 产出: 网关 → `compile_graph_with_tools(mcp_tools)` → astream
-  - 验收: 网关收到消息 → 创建 Thread → 开始推理 → 返回结果
+- [ ] **Task 1.3**: HITL 拒绝处理 `[P1 · 20min]`
+  - 产出: 同文件
+  - 验收: 用户点击"拒绝" → Agent 回复"采购已取消"
 
 - [ ] **复盘: Day 1**
-  - 验收: 飞书可发消息，本地收到并回复
+  - 验收: Chainlit 可对话，HITL interrupt/resume 闭环走通
 
 ---
 
-### Day 2: Dev Mode 身份劫持
+### Day 2: 角色切换 + 全链路联调
 
-- [x] **Task 2.1**: DEV_MODE 环境变量支持 `[P0 · 15min]`
-  - 产出: `app/core/config.py`（字段已存在: `DEV_MODE: bool = False`）
-  - 验收: 配置开关生效 → ✅ Sprint 1 已实现
-
-- [ ] **Task 2.2**: 输入伪装 Middleware + `/role` 命令 `[P0 · 1h]`
-  - 产出: `app/gateway/auth.py`
+- [ ] **Task 2.1**: 角色切换命令 `[P0 · 30min]`
+  - 产出: `app/chainlit_app.py`
   - 职责:
-    1. `/role 采购员` / `/role 财务经理` 命令解析 → 切换当前角色
-    2. 物理账号 open_id → 逻辑身份映射
-  - 验收: 用户发 `/role 财务经理` → 后续操作以该角色身份执行
+    1. 解析 `/role 采购员` / `/role 财务经理` 命令
+    2. 将当前角色存入 `cl.user_session`
+    3. 注入到 AgentState 的 `operator_role` 字段
+  - 验收: 发送 `/role 财务经理` → 后续操作以该角色身份执行
 
-- [ ] **Task 2.3**: 路由重定向 `[P0 · 40min]`
-  - 产出: 同上文件
-  - 验收: 审批卡片目标替换为物理账号
+- [ ] **Task 2.2**: 5 场景全链路联调 `[P0 · 2h]`
+  - 产出: 端到端测试
+  - 验收:
+    - S1 常规采购: Chainlit 发"买 5 台显示器给 IT 部" → 完成建单
+    - S2 库存不足: Agent 推荐减量方案
+    - S3 HITL: 超预算 → 弹窗 → 批准 → resumed
+    - S4 阶梯凑单: Agent 建议加购 → 用户确认/拒绝
+    - S5 综合寻源: Agent 展示多供应商对比
 
-- [ ] **Task 2.4**: `[测试模式]` 标签注入 `[P1 · 20min]`
-  - 产出: 同上文件
-  - 验收: 卡片显式标注测试模式
-
-- [ ] **Task 2.5**: 回调反向伪装 `[P0 · 40min]`
-  - 产出: 同上文件
-  - 验收: 点击"批准" → 操作为 finance_manager
-
-- [ ] **Task 2.6**: Dev Mode 单元测试 `[P1 · 30min]`
-  - 产出: `tests/test_gateway/test_dev_mode.py`
-  - 验收: 全部场景覆盖
-
-- [ ] **复盘: Day 2**
-  - 验收: 单物理账号可扮演 2 个逻辑角色
-
----
-
-### Day 3: 飞书卡片交互 + Thread 唤醒
-
-- [ ] **Task 3.1**: 审批回调接收端点 `[P0 · 40min]`
-  - 产出: `app/gateway/callback.py`
-  - 验收: 飞书卡片按钮回调 → 接收并解析
-
-- [ ] **Task 3.2**: 调用 LangGraph API resume Thread `[P0 · 40min]`
-  - 产出: 同文件
-  - 验收: 回调解析后恢复 Thread
-
-- [ ] **Task 3.3**: `operator_role` 在回调中提升 `[P0 · 30min]`
-  - 产出: `app/gateway/auth.py`
-  - 验收: 审批回调 → `operator_role="finance_manager"`
-
-- [ ] **Task 3.4**: 回调后结果回复 `[P1 · 20min]`
-  - 产出: `app/gateway/card_builder.py`
-  - 验收: 用户收到审批结果卡片
-
-- [ ] **复盘: Day 3**
-  - 验收: 飞书卡片 → 回调 → resume → 回复 闭环
-
----
-
-### Day 4: 上下文管理与多轮对话
-
-- [ ] **Task 4.1**: `session_id` ↔ `thread_id` 映射管理 `[P0 · 40min]`
-  - 产出: `app/gateway/server.py`
-  - 验收: 相同飞书用户/群持续同一 Thread
-
-- [ ] **Task 4.2**: `thread_id` 传递逻辑 `[P0 · 20min]`
-  - 产出: 通过 URL 参数或 Header
-  - 验收: LangGraph API 能正确恢复
-
-- [ ] **Task 4.3**: 用户模糊输入处理 `[P0 · 40min]`
-  - 产出: `app/agent/nodes.py` parse_input 节点
-  - 验收: "就按这个来" → 沿用当前 State
-
-- [ ] **Task 4.4**: 上下文清理策略 `[P1 · 20min]`
-  - 产出: `app/gateway/server.py`
-  - 验收: 超过 24h 或用户要求重置 → 新 Thread
-
-- [ ] **复盘: Day 4**
-  - 验收: 多轮对话上下文正确保持
-
----
-
-### Day 5: 全链路联调 + 5 场景验证
-
-- [ ] **Task 5.1**: 通过飞书完成 S1 常规采购 `[P0 · 30min]`
-  - 验收: 飞书发"买 5 台显示器给 IT 部" → 完成建单
-
-- [ ] **Task 5.2**: 通过飞书完成 S2 库存不足 `[P0 · 30min]`
-  - 验收: Agent 推荐减量方案
-
-- [ ] **Task 5.3**: 通过飞书完成 S3 HITL 审批流 `[P0 · 30min]`
-  - 验收: 超预算 → 挂起 → 卡片审批 → resumed
-
-- [ ] **Task 5.4**: 通过飞书完成 S4 阶梯凑单 `[P0 · 30min]`
-  - 验收: Agent 建议加购 → 用户确认/拒绝
-
-- [ ] **Task 5.5**: 通过飞书完成 S5 综合寻源 `[P0 · 30min]`
-  - 验收: Agent 展示多供应商对比
-
-- [ ] **Task 5.6**: Bug 修复清单 `[P1 · 1h]`
+- [ ] **Task 2.3**: Bug 修复清单 `[P1 · 30min]`
   - 产出: 修复报告
   - 验收: 无阻塞性问题
 
-- [ ] **复盘: Day 5**
-  - 验收: 飞书端全部 5 场景畅通
+- [ ] **复盘: Day 2**
+  - 验收: Chainlit 端全部 5 场景畅通
 
 ---
 
-🏆 **Sprint 2 里程碑**：飞书端跑通全部 5 场景，Dev Mode 身份切换正常，HITL 审批卡片交互闭环。
+### Day 3: Buffer + 边界处理
+
+- [ ] **Task 3.1**: 用户模糊输入处理 `[P0 · 30min]`
+  - 产出: `app/agent/nodes.py` parse_input 节点
+  - 验收: "就按这个来" → 沿用当前 State
+
+- [ ] **Task 3.2**: 上下文清理策略 `[P1 · 20min]`
+  - 产出: `app/chainlit_app.py`
+  - 验收: 用户要求重置 → 新 Thread
+
+- [ ] **复盘: Day 3**
+  - 验收: 边界场景处理完善
+
+---
+
+🏆 **Sprint 2 里程碑**：Chainlit 端跑通全部 5 场景，HITL 审批弹窗交互闭环，角色切换正常。
 
 ---
 
@@ -432,7 +360,6 @@ services:
     environment:
       DATABASE_URL: postgresql://...  # ← LangGraph checkpointer
       ERP_BASE_URL: http://mock-erp:8000
-      DEV_MODE: "true"
     depends_on: [postgres, mock-erp]
 
   langfuse:
@@ -455,26 +382,7 @@ services:
 
 ---
 
-### Day 3: Cloudflare Tunnels 配置
-
-- [ ] **Task 3.1**: 安装并配置 `cloudflared` `[P0 · 30min]`
-  - 验收: `cloudflared tunnel list` 显示隧道
-
-- [ ] **Task 3.2**: 飞书网关映射公网地址 `[P0 · 20min]`
-  - 验收: `https://xxx.trycloudflare.com` 可访问
-
-- [ ] **Task 3.3**: 飞书开放平台配置 Webhook URL `[P0 · 20min]`
-  - 验收: 飞书后台能收到事件回调
-
-- [ ] **Task 3.4**: 全链路回调测试 `[P1 · 30min]`
-  - 验收: 飞书发消息 → Agent 回复 → 成功
-
-- [ ] **复盘: Day 3**
-  - 验收: 公网可接收飞书回调，全链路通
-
----
-
-### Day 4: 架构资产 + README
+### Day 3: 架构资产 + README
 
 - [ ] **Task 4.1**: Mermaid 架构图 `[P0 · 40min]`
   - 产出: `docs/ARCHITECTURE.md` (4 层解耦 + 双库隔离)
@@ -493,7 +401,7 @@ services:
 
 ---
 
-### Day 5: 录屏 + Langfuse 截图 + 复盘
+### Day 4: 录屏 + Langfuse 截图 + 复盘
 
 - [ ] **Task 5.1**: 1.5 倍速"一镜到底"演示录屏 `[P0 · 1h]`
   - 产出: 2-3 分钟视频文件
@@ -522,9 +430,9 @@ services:
 |---|---|---|---|---|
 | Agent 单元测试 | pytest | Day 5 | — | Day 1 补充 |
 | MCP 单元测试 | pytest + httpx | Day 3 | — | — |
-| Dev Mode 测试 | pytest + FastAPI TestClient | — | Day 2 | — |
-| 全链路集成 | 手动 + 脚本 | Day 5 | Day 5 | Day 5 |
-| E2E (飞书) | 手动 | — | Day 5 | Day 3 |
+| HITL 审批测试 | pytest + Chainlit | — | Day 1 | — |
+| 全链路集成 | 手动 + 脚本 | Day 5 | Day 2 | Day 4 |
+| E2E (Chainlit) | 手动 | — | Day 2 | Day 4 |
 
 ---
 
@@ -533,7 +441,6 @@ services:
 | 风险 | 影响 | 缓解措施 |
 |---|---|---|
 | PostgreSQL Checkpointer 配置复杂 | Sprint 1 延后 | Day 1 先用 MemorySaver, Day 5 再换 PostgresSaver |
-| 飞书卡片 API 使用成本 | Sprint 2 延后 | 先发纯文本消息, Day 3 再切卡片 |
 | Langfuse 与 LangGraph 集成问题 | 观测数据不全 | Day 1 就打通基础 Trace, 后续逐步 enrich |
-| Cloudflare Tunnels 网络问题 | 回调不可用 | 准备 ngrok 作为降级方案 |
+| Chainlit 与 LangGraph 集成问题 | HITL 不通 | 参考官方文档, Day 1 优先打通 interrupt/resume |
 | 5 场景验收条件变化 | 范围蔓延 | 严格控制 Day 目标, S4/S5 若有时间剩余再 enrich |
