@@ -230,13 +230,23 @@ gantt
 
 ### Day 1: Chainlit 基础集成 + HITL
 
-> **TODO**: Task 0.6 是 Sprint 2 的前提任务。`call_model` 补全后才能跑通生产图链路。
-
-- [ ] **Task 0.6**: 补全 `call_model` 节点 — LLM 调用 `[P0 · 1h]`
-  - 产出: `app/agent/nodes.py` 中 call_model 改为真实 LLM 调用（deepseek-v4-pro + System Prompt）
-  - 验收: `build_graph(tools=mcp_tools)` 编译后，用户输入可触发 LLM 调用工具
+- [x] **Task 0.6**: 补全 `call_model` 节点 — LLM 调用 `[P0 · 1h]`
+  - 产出: `app/agent/graph.py` 中 `build_graph(tools=...)` 生产模式内置 `_call_model` 闭包
+  - 验收: `build_graph(tools=mcp_tools)` 编译成功，LLM 调用 + ToolNode + 路由完整 → ✅
   - 依赖: LLM API Key（配在 .env）
   - 参考: PRD §3.5 (LLM 选型), 03-Tech-Arch §八 (System Prompt 模板)
+  - 备注: `_call_model` 捕获 LLM 实例 + tools_desc，通过 `llm_with_tools.ainvoke()` 调用，System Prompt 在 `prompts.py` 中定义
+
+- [x] **Task 0.7**: 混合架构重构 — ToolNode + 显式业务节点 `[P0 · 2h]`
+  - 产出: `app/agent/nodes.py` + `app/agent/routing.py` + `app/agent/graph.py` + `app/agent/state.py`
+  - 职责:
+    1. 新增 6 个业务节点: `parse_input`, `analyze_simulate`, `present_options`, `show_alternatives`, `user_resolve`, `confirm_and_submit`
+    2. 新增 2 个路由函数: `route_after_analysis`, `route_after_user_choice`
+    3. AgentState 新增 3 字段: `user_intent`, `analysis_result`, `alternative_products`
+    4. 生产模式图结构: `parse_input → call_model → ToolNode → route_after_tools → analyze_simulate → present_options → confirm_and_submit`
+    5. System Prompt 添加输出格式约束（结论/详情/操作）
+  - 验收: 13 个测试全部通过 → ✅
+  - 参考: 03-Tech-Arch §一（混合架构节点图）
 
 - [ ] **Task 1.1**: Chainlit 基础集成 `[P0 · 1h]`
   - 产出: `app/chainlit_app.py` (Chainlit 入口)

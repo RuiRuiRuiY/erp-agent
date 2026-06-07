@@ -1,10 +1,253 @@
 import json
 
+from langchain_core.messages import SystemMessage
 from langgraph.types import Command, interrupt
 
 from app.agent.state import AgentState
 from app.mcp.client import get as erp_get
 from app.mcp.server import override_purchase_order, transit_po_status
+
+
+def _get_llm():
+    """获取缓存的 LLM 实例。"""
+    from app.agent.graph import _get_llm as _cached_llm
+    return _cached_llm()
+
+
+async def parse_input(state: AgentState) -> dict:
+    """LLM 解析用户输入，提取意图、部门、商品等关键信息。"""
+    llm = _get_llm()
+    from app.agent.prompts import SYSTEM_PROMPT
+
+    system = SYSTEM_PROMPT.format(
+        tools="（工具调用由系统自动处理，你只需关注意图解析）",
+        po_status=state.get("po_status") or "新会话",
+        context="解析用户输入",
+    )
+
+    user_msg = state["messages"][-1].content if state.get("messages") else ""
+    messages = [
+        SystemMessage(content=system),
+        SystemMessage(content=f"请解析以下用户输入的意图，提取部门、商品、数量等信息：\n{user_msg}"),
+    ]
+
+    response = await llm.ainvoke(messages)
+    content = response.content
+
+    result = {
+        "user_intent": content,
+        "messages": [response],
+    }
+
+    try:
+        if content.strip().startswith("{"):
+            data = json.loads(content)
+            if isinstance(data, dict):
+                if data.get("department_id"):
+                    result["department_id"] = data["department_id"]
+                if data.get("cart_items"):
+                    result["cart_items"] = data["cart_items"]
+                if data.get("selected_supplier_id"):
+                    result["selected_supplier_id"] = data["selected_supplier_id"]
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+    return result
+
+
+async def analyze_simulate(state: AgentState) -> dict:
+    """LLM 分析试算结果，判断阶梯价、库存风险、供应商差异。"""
+    msgs = state.get("messages", [])
+    if not msgs:
+        return {}
+
+    last_content = ""
+    for msg in reversed(msgs):
+        content = getattr(msg, "content", "")
+        if isinstance(content, str) and content.strip().startswith("{"):
+            last_content = content
+            break
+
+    if not last_content:
+        return {}
+
+    try:
+        data = json.loads(last_content)
+    except json.JSONDecodeError:
+        return {}
+
+    if not isinstance(data, dict) or not data.get("all_quotes"):
+        return {}
+
+    llm = _get_llm()
+    from app.agent.prompts import SYSTEM_PROMPT
+
+    system = SYSTEM_PROMPT.format(
+        tools="（分析试算结果）",
+        po_status=state.get("po_status") or "试算完成",
+        context=f"试算结果: {json.dumps(data, ensure_ascii=False)[:2000]}",
+    )
+
+    messages = [
+        SystemMessage(content=system),
+        SystemMessage(content="请分析以上试算结果，判断：\n1. 是否有阶梯价格机会\n2. 是否有库存风险\n3. 供应商之间的关键差异"),
+    ]
+
+    response = await llm.ainvoke(messages)
+
+    return {
+        "analysis_result": {
+            "has_tier_opportunity": bool(state.get("tier_suggestion")),
+            "has_stock_risk": "库存不足" in (response.content or ""),
+            "summary": response.content,
+        },
+        "messages": [response],
+    }
+
+
+async def present_options(state: AgentState) -> dict:
+    """格式化展示供应商选项，等待用户选择。"""
+    msgs = state.get("messages", [])
+    last_data = None
+
+    for msg in reversed(msgs):
+        content = getattr(msg, "content", "")
+        if isinstance(content, str) and content.strip().startswith("{"):
+            try:
+                data = json.loads(content)
+                if isinstance(data, dict) and data.get("all_quotes"):
+                    last_data = data
+                    break
+            except json.JSONDecodeError:
+                continue
+
+    if not last_data:
+        return {}
+
+    lines = ["供应商选项：\n"]
+    for i, quote in enumerate(last_data.get("all_quotes", []), 1):
+        sname = quote.get("supplier_name", f"供应商{i}")
+        score = quote.get("score", "N/A")
+        delivery = quote.get("estimated_delivery_days", "N/A")
+        total = quote.get("total_amount", 0)
+        lines.append(f"{i}. {sname}")
+        lines.append(f"   评分: {score} | 交期: {delivery}天 | 总价: ¥{total:.2f}")
+
+        for detail in quote.get("line_details", []):
+            pname = detail.get("product_name", "")
+            qty = detail.get("quantity", 0)
+            price = detail.get("unit_price", 0)
+            lines.append(f"   - {pname}: {qty}件 × ¥{price:.2f}")
+        lines.append("")
+
+    lines.append("请选择供应商编号，或输入其他条件重新试算。")
+
+    return {
+        "supplier_choice_prompted": True,
+        "messages": [{"role": "assistant", "content": "\n".join(lines)}],
+    }
+
+
+async def show_alternatives(state: AgentState) -> dict:
+    """展示替代商品方案（stock_error 恢复路径）。"""
+    ctx = state.get("error_context") or {}
+    product_id = ctx.get("product_id", "")
+    requested = ctx.get("requested", 0)
+    available = ctx.get("available", 0)
+
+    try:
+        products = await erp_get("/products", params={"keyword": product_id})
+    except Exception:
+        products = []
+
+    alternatives = []
+    if isinstance(products, list):
+        for p in products[:3]:
+            if p.get("id") != product_id and p.get("stock_quantity", 0) > 0:
+                alternatives.append({
+                    "product_id": p["id"],
+                    "product_name": p.get("name", ""),
+                    "stock": p.get("stock_quantity", 0),
+                })
+
+    if alternatives:
+        lines = ["替代商品方案：\n"]
+        for i, alt in enumerate(alternatives, 1):
+            lines.append(f"{i}. {alt['product_name']} (库存: {alt['stock']}件)")
+        lines.append("\n请选择替代商品编号，或调整数量。")
+        msg = "\n".join(lines)
+    else:
+        msg = (
+            f"商品 {product_id} 库存不足（需 {requested}，可用 {available}）。\n"
+            "暂无替代商品，请调整采购需求。"
+        )
+
+    return {
+        "alternative_products": alternatives,
+        "messages": [{"role": "assistant", "content": msg}],
+    }
+
+
+def user_resolve(state: AgentState) -> dict:
+    """interrupt() 等待用户选择恢复方案。"""
+    choice = interrupt({
+        "pending_type": "stock_resolve",
+        "request": "user_choice",
+        "message": "请选择恢复方案",
+        "alternatives": state.get("alternative_products", []),
+    })
+
+    return {
+        "user_intent": str(choice),
+    }
+
+
+async def confirm_and_submit(state: AgentState) -> dict:
+    """最终确认后调用 draft_purchase_order 创建采购单。"""
+    dept_id = state.get("department_id")
+    supplier_id = state.get("selected_supplier_id")
+    cart_items = state.get("cart_items", [])
+
+    if not all([dept_id, supplier_id, cart_items]):
+        return {
+            "messages": [{
+                "role": "assistant",
+                "content": "缺少必要参数（部门/供应商/商品），无法创建采购单。",
+            }],
+        }
+
+    items = [
+        {"product_id": item["product_id"], "quantity": item["quantity"]}
+        for item in cart_items
+    ]
+
+    from app.mcp.server import draft_purchase_order
+    raw = await draft_purchase_order(
+        department_id=dept_id,
+        supplier_id=supplier_id,
+        items=items,
+    )
+    data = json.loads(raw)
+
+    if data.get("_error"):
+        return {
+            "messages": [{
+                "role": "assistant",
+                "content": f"建单失败：{data.get('user_message', data.get('message', ''))}",
+            }],
+        }
+
+    po_id = data["id"]
+    msg = (
+        f"采购单已创建：{data['po_number']}，金额 ¥{data['total_amount']:.2f}，状态 {data['status']}"
+    )
+
+    return {
+        "po_draft_id": po_id,
+        "po_status": data["status"],
+        "po_supplier_id": supplier_id,
+        "messages": [{"role": "assistant", "content": msg}],
+    }
 
 
 def _extract_error_context(state: AgentState) -> dict:

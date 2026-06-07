@@ -1,7 +1,9 @@
 """LangGraph Agent 图构建模块。
 
+混合架构：ToolNode 执行 MCP 工具 + 显式业务节点处理逻辑。
+
 提供两种模式：
-- build_graph(tools=[]) — 生产模式：LLM + ToolNode + 完整路由
+- build_graph(tools=[]) — 生产模式：LLM + ToolNode + 业务节点 + 完整路由
 - build_graph(tools=None) — 测试模式：跳过 LLM，直接按 state 路由（用于单元测试）
 """
 
@@ -14,15 +16,21 @@ from langgraph.graph import START, END, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.agent.nodes import (
+    analyze_simulate,
     budget_check,
+    confirm_and_submit,
     hitl_gate,
     override_po,
+    parse_input,
+    present_options,
     resume_cleanup,
+    show_alternatives,
     stock_error,
     tier_suggest,
     transit_to_pending,
+    user_resolve,
 )
-from app.agent.routing import route_after_tools
+from app.agent.routing import route_after_analysis, route_after_tools, route_after_user_choice
 from app.agent.state import AgentState
 from app.core.config import settings
 
@@ -113,7 +121,7 @@ def build_graph(tools: list | None = None, checkpointer: Any = None) -> Any:
     workflow = StateGraph(AgentState)
 
     if tools is not None:
-        # ── 生产模式：LLM + ToolNode ──
+        # ── 生产模式：LLM + ToolNode + 业务节点 ──
         from langchain_core.messages import SystemMessage
         from app.agent.prompts import SYSTEM_PROMPT
 
@@ -142,9 +150,13 @@ def build_graph(tools: list | None = None, checkpointer: Any = None) -> Any:
 
         tool_node = ToolNode(tools)
 
+        # 入口：parse_input → call_model → ToolNode
+        workflow.add_node("parse_input", parse_input)
         workflow.add_node("call_model", _call_model)
         workflow.add_node("tools", tool_node)
-        workflow.add_edge(START, "call_model")
+
+        workflow.add_edge(START, "parse_input")
+        workflow.add_edge("parse_input", "call_model")
         workflow.add_conditional_edges(
             "call_model", tools_condition, {"tools": "tools", "__end__": "__end__"}
         )
@@ -153,11 +165,50 @@ def build_graph(tools: list | None = None, checkpointer: Any = None) -> Any:
             route_after_tools,
             {
                 "call_model": "call_model",
+                "analyze_simulate": "analyze_simulate",
                 "stock_error": "stock_error",
-                "tier_suggest": "tier_suggest",
                 "budget_check": "budget_check",
             },
         )
+
+        # 分析节点
+        workflow.add_node("analyze_simulate", analyze_simulate)
+        workflow.add_conditional_edges(
+            "analyze_simulate",
+            route_after_analysis,
+            {
+                "tier_suggest": "tier_suggest",
+                "show_alternatives": "show_alternatives",
+                "present_options": "present_options",
+                "call_model": "call_model",
+            },
+        )
+
+        # 展示 & 用户选择节点
+        workflow.add_node("present_options", present_options)
+        workflow.add_node("show_alternatives", show_alternatives)
+        workflow.add_node("user_resolve", user_resolve)
+        workflow.add_node("confirm_and_submit", confirm_and_submit)
+
+        workflow.add_conditional_edges(
+            "present_options",
+            route_after_user_choice,
+            {
+                "confirm_and_submit": "confirm_and_submit",
+                "call_model": "call_model",
+            },
+        )
+        workflow.add_conditional_edges(
+            "show_alternatives",
+            route_after_user_choice,
+            {
+                "confirm_and_submit": "confirm_and_submit",
+                "call_model": "call_model",
+            },
+        )
+        workflow.add_edge("user_resolve", "call_model")
+        workflow.add_edge("confirm_and_submit", END)
+
     else:
         # ── 测试模式：按 state 直接路由，跳过 LLM ──
         workflow.add_node("entry", lambda s: {})

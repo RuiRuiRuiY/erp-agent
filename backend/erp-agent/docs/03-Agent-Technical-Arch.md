@@ -8,92 +8,133 @@
 
 ## 一、LangGraph 节点图
 
+### 混合架构：ToolNode + 显式业务节点
+
+生产模式下，LangGraph 使用 **ToolNode 统一执行 MCP 工具**，**显式业务节点负责逻辑判断与用户交互**：
+
 ```mermaid
 flowchart TD
-    start([用户输入]) --> parse_input[parse_input\n提取意图/部门/商品]
-    parse_input --> route_check{route_check\n判断场景}
+    start([用户输入]) --> parse_input[parse_input\nLLM 提取意图/部门/商品]
+    parse_input --> call_model[call_model\nLLM 决定调用哪些工具]
+    call_model -->|有工具调用| tool_node[ToolNode\n执行 MCP 工具]
+    call_model -->|无工具调用| END([结束])
 
-    route_check -->|需要查品| search_product[search_product\nMCP: GET /products]
-    search_product --> check_dept[check_department\nMCP: GET /departments]
-    check_dept --> check_bgt[check_budget\nMCP: GET /budgets/id]
+    tool_node --> route_after_tools{route_after_tools\n检查工具结果}
 
-    route_check -->|已有商品信息| check_dept
+    route_after_tools -->|工具返回错误| stock_error[stock_error\n库存不足处理]
+    route_after_tools -->|预算透支| budget_check[budget_check\n预算检查]
+    route_after_tools -->|有试算结果| analyze_simulate[analyze_simulate\nLLM 分析试算]
+    route_after_tools -->|其他情况| call_model
 
-    check_bgt --> budget_check{budget_check\n预算是否充足?}
-    budget_check -->|充足| simulate[simulate_purchase\nMCP: POST /pricing/simulate]
-    budget_check -->|不足但无需挂起| simulate
+    analyze_simulate --> route_after_analysis{route_after_analysis\n分析结果路由}
 
-    budget_check -->|不足且需挂起| hitl_gate
-
-    simulate --> analyze_sim[analyze_simulate\n分析试算结果\n检查阶梯价/库存/供应商]
-    analyze_sim -->|发现阶梯价优化| tier_suggest[tier_suggest\n主动建议凑单]
-    analyze_sim -->|库存风险预判| stock_warn[stock_warn\n预判库存, 提前提示]
-    analyze_sim -->|正常| present_options[present_options\n展示供应商选项]
+    route_after_analysis -->|发现阶梯价| tier_suggest[tier_suggest\n凑单建议]
+    route_after_analysis -->|库存风险| show_alternatives[show_alternatives\n展示替代方案]
+    route_after_analysis -->|正常| present_options[present_options\n展示供应商选项]
+    route_after_analysis -->|需进一步工具| call_model
 
     tier_suggest --> present_options
-    stock_warn --> present_options
+    show_alternatives --> user_resolve[user_resolve\ninterrupt 等待用户选择]
+    user_resolve -->|用户选择后| call_model
 
-    present_options --> user_choice{user_choice\n用户选择供应商}
+    present_options --> route_after_user_choice{route_after_user_choice\n用户选择路由}
 
-    user_choice -->|接受推荐| draft_po[draft_purchase_order\nMCP: POST /po]
-    user_choice -->|改选其他| switch_supplier[switch_supplier\n切换供应商]
-    user_choice -->|提新条件| simulate
+    route_after_user_choice -->|确认下单| confirm_and_submit[confirm_and_submit\n创建采购单]
+    route_after_user_choice -->|重新试算| call_model
 
-    switch_supplier --> draft_po
-    draft_po -->|成功| transit_pending[transit_po_status\nDRAFT→PENDING]
+    confirm_and_submit --> END
 
-    draft_po -->|BUDGET_INSUFFICIENT| hitl_gate
-    draft_po -->|INSUFFICIENT_STOCK| stock_error[stock_error\n库存不足处理]
-
-    subgraph error_recovery [异常自愈]
-        stock_error --> show_alternatives[show_alternatives\n展示替代方案]
-        show_alternatives --> user_resolve[user_resolve\n用户选择]
-        user_resolve -->|减量| simulate
-        user_resolve -->|换品| search_product
-    end
+    stock_error --> END
 
     subgraph hitl [HITL 审批流]
-        hitl_gate[[interrupt_before\n挂起]] --> send_card[发送审批卡片]
-        send_card --> wait_approval[...等待用户审批...]
-        wait_approval -->|override_token 注入| resume[resume]
-        resume --> override_po[override_purchase_order\nMCP: POST /po/override]
-        override_po --> transit_pending
+        budget_check --> hitl_gate[hitl_gate\ninterrupt 挂起]
+        hitl_gate --> override_po[override_po\n特批建单]
+        override_po --> transit_to_pending[transit_to_pending\nDRAFT→PENDING]
+        transit_to_pending --> resume_cleanup[resume_cleanup\n状态清理]
     end
+    resume_cleanup --> END
+```
 
-    transit_pending --> inform[inform_user\n回复用户结果]
-    inform --> end_node([等待下一轮输入])
+### 测试模式
+
+测试模式跳过 LLM，直接按 state 字段路由到业务节点：
+
+```mermaid
+flowchart TD
+    start([测试输入]) --> entry[entry\n空操作]
+    entry --> _test_route{_test_route\n按 state 路由}
+
+    _test_route -->|error_context 存在| stock_error
+    _test_route -->|simulate_result 存在| tier_suggest
+    _test_route -->|pending_approval_type=budget| budget_check
+    _test_route -->|其他| route_after_tools
+
+    stock_error --> END
+    tier_suggest --> END
+    budget_check --> hitl_gate
+    hitl_gate --> override_po
+    override_po --> transit_to_pending
+    transit_to_pending --> resume_cleanup
+    resume_cleanup --> END
 ```
 
 ### 节点定义
 
-| 节点名                       | 类型        | 职责                                              | 调用 MCP 工具                 |
-| ------------------------- | --------- | ----------------------------------------------- | ------------------------- |
-| `parse_input`             | LLM       | 从用户自然语言提取 department, product, quantity, intent | 无                         |
-| `search_product`          | Tool      | 按名称搜索商品                                         | `search_product`          |
-| `check_department`        | Tool      | 获取部门 ID                                         | `check_department`        |
-| `check_budget`            | Tool      | 查询可用预算                                          | `check_budget`            |
-| `simulate_purchase`       | Tool      | 执行价格试算                                          | `simulate_purchase`       |
-| `analyze_simulate`        | LLM       | 分析试算结果，判断阶梯价、库存、供应商                             | 无                         |
-| `tier_suggest`            | LLM       | 生成凑单建议文本                                        | 无                         |
-| `present_options`         | LLM       | 格式化展示供应商选项                                      | 无                         |
-| `draft_purchase_order`    | Tool      | 创建采购草稿单                                         | `draft_purchase_order`    |
-| `transit_pending`         | Tool      | 状态流转 DRAFT→PENDING                              | `transit_po_status`       |
-| `override_purchase_order` | Tool      | 特批建单                                            | `override_purchase_order` |
-| `stock_error`             | LLM       | 解析库存不足错误，生成替代方案                                 | 无                         |
-| `hitl_gate`               | Interrupt | 挂起点，等待 override_token                           | 无                         |
-| `inform_user`             | LLM       | 生成最终回复                                          | 无                         |
+#### 核心节点（生产模式）
+
+| 节点名 | 类型 | 职责 | 调用 MCP 工具 |
+|--------|------|------|---------------|
+| `parse_input` | LLM | 从用户自然语言提取 department, product, quantity, intent | 无 |
+| `call_model` | LLM | 绑定 tools，让 LLM 决定调用哪些 MCP 工具 | 无（LLM 自动选择） |
+| `tool_node` | ToolNode | 统一执行 LLM 选中的 MCP 工具 | 所有 MCP 工具 |
+| `analyze_simulate` | LLM | 分析试算结果，判断阶梯价、库存风险、供应商差异 | 无 |
+| `present_options` | LLM | 格式化展示供应商选项，等待用户选择 | 无 |
+| `confirm_and_submit` | MCP | 最终确认后调用 draft_purchase_order 创建采购单 | `draft_purchase_order` |
+
+#### 异常处理节点
+
+| 节点名 | 类型 | 职责 | 调用 MCP 工具 |
+|--------|------|------|---------------|
+| `stock_error` | LLM | 解析 INSUFFICIENT_STOCK 错误，生成替代方案 | 无 |
+| `show_alternatives` | LLM | 展示替代商品方案 | `GET /products`（搜索替代品） |
+| `user_resolve` | Interrupt | interrupt() 等待用户选择恢复方案 | 无 |
+| `tier_suggest` | LLM | 检测阶梯价格差距，生成凑单建议 | `GET /suppliers/{id}/pricelists` |
+| `budget_check` | LLM | 处理预算不足，设 pending_approval_type | 无 |
+
+#### HITL 审批节点
+
+| 节点名 | 类型 | 职责 | 调用 MCP 工具 |
+|--------|------|------|---------------|
+| `hitl_gate` | Interrupt | interrupt() 挂起等待 override_token | 无 |
+| `override_po` | MCP | resume 后调用 override_purchase_order 创建特批采购单 | `override_purchase_order` |
+| `transit_to_pending` | MCP | 将特批 PO 从 DRAFT 流转到 PENDING | `transit_po_status` |
+| `resume_cleanup` | LLM | 恢复后状态清理，清除已被消费的临时字段 | 无 |
 
 ### 路由条件
 
 ```
-路由:
-  parse_input → search_product:    用户输入含商品名称, 但 state 中无 product_id
-  parse_input → check_department:  有商品信息, 但 state 中无 department_id
-  check_budget → hitl_gate:        预算不足 且 用户同意申请特批
-  analyze_simulate → tier_suggest: 存在更高阶梯且节省金额 > 阈值
-  draft_po → hitl_gate:            BUDGET_INSUFFICIENT 异常
-  draft_po → stock_error:          INSUFFICIENT_STOCK 异常
-  user_choice → switch_supplier:   用户选择的 supplier 与推荐不同
+route_after_tools:
+  工具返回 _error + action=self_heal    → stock_error
+  工具返回 _error + action=request_override → budget_check
+  工具返回 all_quotes                    → analyze_simulate
+  工具返回 available < 0                 → budget_check
+  其他                                    → call_model
+
+route_after_analysis:
+  has_tier_opportunity=true              → tier_suggest
+  has_stock_risk=true                    → show_alternatives
+  分析结果含 all_quotes                  → present_options
+  其他                                   → call_model
+
+route_after_user_choice:
+  状态含 selected_supplier_id + cart_items → confirm_and_submit
+  其他                                    → call_model
+
+_test_route (测试模式):
+  error_context 存在                     → stock_error
+  simulate_result 存在                   → tier_suggest
+  pending_approval_type=budget           → budget_check
+  其他                                   → route_after_tools
 ```
 
 ---
@@ -132,6 +173,12 @@ class AgentState(TypedDict):
     override_token: str | None                # 人类提供的特批 Token
     operator_role: str                        # 操作者角色: agent / finance_manager
     pending_approval_type: str | None         # 挂起类型: override / transit_approve
+
+    # --- 智能分析 ---
+    tier_suggestion: str | None               # 阶梯凑单建议文本
+    user_intent: str | None                   # parse_input 提取的用户意图
+    analysis_result: dict | None              # analyze_simulate 的分析结果
+    alternative_products: list | None         # show_alternatives 的替代商品列表
 
     # --- 错误自愈 ---
     error_context: dict | None                # 捕获的结构化错误
@@ -354,16 +401,15 @@ async def on_message(message: cl.Message):
 ```
 Trace: session_id (用户会话) / thread_id (LangGraph 线程)
 ├── Span: parse_input           → LLM 调用 (提取意图)
-├── Span: search_product        → MCP tool call (含裁剪前后 Token 对比)
-├── Span: check_budget          → MCP tool call
-├── Span: simulate_purchase     → MCP tool call (重点观测)
+├── Span: call_model            → LLM 调用 (决定工具调用)
+├── Span: ToolNode              → MCP 工具执行 (search_product / check_budget / simulate_purchase...)
 │   ├── Span: HTTP request      → mock-erp API
 │   └── Span: pruning           → 响应裁剪 (记录原始大小 vs 裁剪后大小)
-├── Span: analyze_simulate      → LLM 调用 (分析结果)
-├── Span: draft_purchase_order  → MCP tool call
+├── Span: analyze_simulate      → LLM 调用 (分析试算结果)
+├── Span: present_options       → 格式化展示供应商选项
+├── Span: confirm_and_submit    → MCP: draft_purchase_order
 │   ├── Span: HTTP request
 │   └── Span: error_intercept   → 如果捕获到异常
-├── Span: inform_user           → LLM 调用 (生成回复)
 └── Span: total                 → 汇总
 ```
 
@@ -453,10 +499,10 @@ PostgreSQL 存储的 State 快照包含：
 6. 用户输入模糊时，根据当前 State 推断意图。例如：用户说"就按这个来"时，使用当前选中的供应商和商品信息。
 
 ## 输出格式
-保持简洁。每个回复包含：
-- 结论（一句话）
-- 详情（表格/列表）
-- 操作（让用户选择的选项）
+每次回复必须按以下结构组织：
+- **结论**：一句话概括当前状态
+- **详情**：关键数据（价格、库存、预算等）
+- **操作**：用户可执行的下一步动作
 
 ## 状态提示
 当前进度: {po_status 或 "新会话"}
@@ -471,11 +517,12 @@ PostgreSQL 存储的 State 快照包含：
 erp-agent/
 ├── app/
 │   ├── agent/
-│   │   ├── graph.py              # StateGraph 定义与编译
-│   │   ├── nodes.py              # 所有节点函数
-│   │   ├── state.py              # AgentState TypedDict
-│   │   ├── routing.py            # 路由条件函数
-│   │   └── prompts.py            # System Prompt 模板
+│   │   ├── graph.py              # StateGraph 定义与编译 (build_graph)
+│   │   ├── nodes.py              # 所有节点函数 (含 6 个业务节点)
+│   │   ├── state.py              # AgentState TypedDict (21 字段)
+│   │   ├── routing.py            # 路由条件函数 (route_after_tools/analysis/user_choice)
+│   │   ├── prompts.py            # System Prompt 模板
+│   │   └── __init__.py           # 导出 build_graph
 │   ├── mcp/
 │   │   ├── server.py             # MCP Server 入口 + 所有工具实现
 │   │   ├── client.py             # HTTP Client (httpx → mock-erp)
@@ -490,11 +537,13 @@ erp-agent/
 ├── docs/                         # 文档
 ├── tests/
 │   ├── test_agent/
+│   │   ├── test_hitl.py          # HITL 审批测试
 │   │   ├── test_scenario_s1.py   # S1 常规采购
 │   │   ├── test_scenario_s2.py   # S2 库存不足
 │   │   ├── test_scenario_s3.py   # S3 HITL
 │   │   ├── test_scenario_s4.py   # S4 阶梯凑单
-│   │   └── test_scenario_s5.py   # S5 综合寻源
+│   │   ├── test_scenario_s5.py   # S5 综合寻源
+│   │   └── test_scenarios.py     # 5 个业务陷阱场景测试
 │   ├── test_mcp/
 │   │   ├── test_pruning.py       # 裁剪效果测试
 │   │   └── test_interceptor.py   # 越权拦截测试

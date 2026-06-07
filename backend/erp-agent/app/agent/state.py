@@ -33,6 +33,10 @@ class AgentState(TypedDict):
 
     tier_suggestion: str | None
 
+    user_intent: str | None
+    analysis_result: dict | None
+    alternative_products: list | None
+
     error_context: dict | None
     recovery_attempted: bool
     recovery_path: str | None

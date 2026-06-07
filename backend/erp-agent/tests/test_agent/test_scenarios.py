@@ -135,9 +135,9 @@ async def _scenario_4():
     assert q80.get("unit_price") == 100.0, f"80 个应为 100 元/个"
     assert q80.get("quantity") * q80.get("unit_price") == 8000.0
 
-    # ── 2. tier_suggest 生成凑单建议 ────────────────────────────────
+    # ── 2. analyze_simulate → tier_suggest 生成凑单建议 ─────────────
     state = make_state(raw)
-    assert route_after_tools(state) == "tier_suggest"
+    assert route_after_tools(state) == "analyze_simulate"
     result = await tier_suggest(state)
     ts = result.get("tier_suggestion", "")
     assert ts, "应生成凑单建议"
@@ -221,9 +221,9 @@ async def _scenario_5():
     # 结论：各有优势，需 Agent 根据用户偏好推荐
 
     # ── 5. 路由校验 ──────────────────────────────────────────────────
-    # simulate_purchase 有 all_quotes → 路由到 tier_suggest
+    # simulate_purchase 有 all_quotes → 路由到 analyze_simulate
     state = make_state(raw)
-    assert route_after_tools(state) == "tier_suggest"
+    assert route_after_tools(state) == "analyze_simulate"
     # 键盘 5 个没有阶梯价 → tier_suggest 返回空
     result = await tier_suggest(state)
     assert not result.get("tier_suggestion"), "键盘无阶梯价，不应生成建议"
