@@ -253,7 +253,7 @@ def build_graph(tools: list | None = None, checkpointer: Any = None) -> Any:
     workflow.add_edge("transit_to_pending", "resume_cleanup")
     workflow.add_edge("resume_cleanup", "__end__")
 
-    return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile(checkpointer=checkpointer, interrupt_before=["hitl_gate"])
 
 
 # ── Langfuse 辅助 ──────────────────────────────────────────────────────
