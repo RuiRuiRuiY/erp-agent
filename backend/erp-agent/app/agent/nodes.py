@@ -90,16 +90,35 @@ async def analyze_simulate(state: AgentState) -> dict:
 
     messages = [
         SystemMessage(content=system),
-        SystemMessage(content="请分析以上试算结果，判断：\n1. 是否有阶梯价格机会\n2. 是否有库存风险\n3. 供应商之间的关键差异"),
+        SystemMessage(content=(
+            "请分析以上试算结果。\n"
+            "在回答的最开头，先输出一行 JSON（不要包裹在 markdown 代码块中）：\n"
+            '{"has_tier_opportunity": true/false, "has_stock_risk": true/false}\n'
+            "判断依据：\n"
+            "- has_tier_opportunity: 是否存在阶梯价格机会（如多买可降低单价）\n"
+            "- has_stock_risk: 是否存在库存不足风险\n"
+            "然后换行给出详细分析。"
+        )),
     ]
 
     response = await llm.ainvoke(messages)
 
+    has_tier = False
+    has_stock_risk = False
+    content = response.content or ""
+    first_line = content.strip().split("\n", 1)[0].strip()
+    try:
+        flags = json.loads(first_line)
+        has_tier = bool(flags.get("has_tier_opportunity", False))
+        has_stock_risk = bool(flags.get("has_stock_risk", False))
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
     return {
         "analysis_result": {
-            "has_tier_opportunity": bool(state.get("tier_suggestion")),
-            "has_stock_risk": "库存不足" in (response.content or ""),
-            "summary": response.content,
+            "has_tier_opportunity": has_tier,
+            "has_stock_risk": has_stock_risk,
+            "summary": content,
         },
         "messages": [response],
     }
@@ -299,20 +318,22 @@ async def tier_suggest(state: AgentState) -> dict:
     if not msgs:
         return {}
 
-    last = msgs[-1]
-    content = getattr(last, "content", "")
-    if not isinstance(content, str) or not content.strip().startswith("{"):
+    simulate_data = None
+    for msg in reversed(msgs):
+        content = getattr(msg, "content", "")
+        if isinstance(content, str) and content.strip().startswith("{"):
+            try:
+                data = json.loads(content)
+                if isinstance(data, dict) and data.get("all_quotes"):
+                    simulate_data = data
+                    break
+            except json.JSONDecodeError:
+                continue
+
+    if not simulate_data:
         return {}
 
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        return {}
-
-    if not isinstance(data, dict):
-        return {}
-
-    all_quotes = data.get("all_quotes")
+    all_quotes = simulate_data.get("all_quotes")
     if not all_quotes:
         return {}
 
