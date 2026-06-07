@@ -25,11 +25,6 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.deepseek.com/v1"
     OPENAI_MODEL: str = "deepseek-v4-pro"
 
-    # 飞书开放平台
-    FEISHU_APP_ID: str = ""
-    FEISHU_APP_SECRET: str = ""
-    FEISHU_OPEN_ID: str = ""
-
 
 # 实例化时，pydantic 会自动去系统环境变量和 .env 文件中查找并赋值
 settings = Settings()

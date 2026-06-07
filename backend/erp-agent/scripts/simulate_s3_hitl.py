@@ -21,7 +21,9 @@ from langgraph.types import Command
 from langchain_core.messages import ToolMessage
 
 from app.agent.state import AgentState
-from app.agent.graph import graph
+from app.agent.graph import build_graph
+
+graph = build_graph()
 
 PASS = "\033[92m[PASS]\033[0m"
 FAIL = "\033[91m[FAIL]\033[0m"

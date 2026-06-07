@@ -234,7 +234,7 @@ gantt
 
 - [ ] **Task 0.6**: 补全 `call_model` 节点 — LLM 调用 `[P0 · 1h]`
   - 产出: `app/agent/nodes.py` 中 call_model 改为真实 LLM 调用（deepseek-v4-pro + System Prompt）
-  - 验收: `compile_graph_with_tools(mcp_tools)` 编译后，用户输入可触发 LLM 调用工具
+  - 验收: `build_graph(tools=mcp_tools)` 编译后，用户输入可触发 LLM 调用工具
   - 依赖: LLM API Key（配在 .env）
   - 参考: PRD §3.5 (LLM 选型), 03-Tech-Arch §八 (System Prompt 模板)
 
@@ -257,6 +257,15 @@ gantt
 - [ ] **Task 1.3**: HITL 拒绝处理 `[P1 · 20min]`
   - 产出: 同文件
   - 验收: 用户点击"拒绝" → Agent 回复"采购已取消"
+
+- [ ] **Task 1.4**: interrupt_before 重构 `[P0 · 1h]` **(Sprint 1 Fix 2)**
+  - 产出: `app/agent/graph.py`
+  - 职责:
+    1. 将 `hitl_gate` 节点内的 `interrupt()` 调用迁移到 `compile(interrupt_before=["hitl_gate"])`
+    2. 简化 `hitl_gate` 节点逻辑（仅读取 interrupt value，不再自行 interrupt）
+    3. 更新所有 HITL 测试用例适配新的中断模式
+  - 验收: HITL interrupt/resume 闭环走通，测试全部通过
+  - 参考: 03-Tech-Arch §4.2
 
 - [ ] **复盘: Day 1**
   - 验收: Chainlit 可对话，HITL interrupt/resume 闭环走通

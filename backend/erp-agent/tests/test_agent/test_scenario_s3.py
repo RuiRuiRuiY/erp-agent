@@ -10,7 +10,9 @@ from langgraph.types import Command
 from langchain_core.messages import ToolMessage
 
 from app.agent.state import AgentState
-from app.agent.graph import graph
+from app.agent.graph import build_graph
+
+graph = build_graph()
 
 
 async def _mock_override_po(**kwargs) -> str:

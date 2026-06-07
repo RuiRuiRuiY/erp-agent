@@ -289,9 +289,10 @@ from langgraph.graph import StateGraph
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.types import Command
 
-# 编译图 (带 checkpointer + interrupt)
+# 编译图 (带 checkpointer)
+# TODO: Sprint 2 — 切换为 interrupt_before=["hitl_gate"] 替代节点内 interrupt()
 checkpointer = PostgresSaver.from_conn_string(DATABASE_URL)
-graph = build_graph().compile(checkpointer=checkpointer, interrupt_before=["hitl_gate"])
+graph = build_graph(checkpointer=checkpointer)
 
 @cl.on_chat_start
 async def on_start():
@@ -419,9 +420,9 @@ checkpointer = PostgresSaver.from_conn_string(
 await checkpointer.setup()
 
 # Graph 编译时传入
+# TODO: Sprint 2 — 切换为 interrupt_before=["hitl_gate"]
 graph = StateGraph(AgentState).compile(
     checkpointer=checkpointer,
-    interrupt_before=["hitl_gate"],
 )
 ```
 

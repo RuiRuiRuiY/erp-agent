@@ -12,7 +12,9 @@ from unittest.mock import AsyncMock, patch
 from langchain_core.messages import ToolMessage
 
 from app.agent.state import AgentState
-from app.agent.graph import graph
+from app.agent.graph import build_graph
+
+graph = build_graph()
 
 
 async def test_s1_regular_purchase():
