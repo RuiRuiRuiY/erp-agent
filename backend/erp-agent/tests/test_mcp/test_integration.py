@@ -2,7 +2,7 @@
 import asyncio
 
 from app.agent.graph import build_graph
-from app.agent.mcp_client import get_mcp_tools
+from app.mcp.client import get_mcp_tools
 
 
 def test_mcp_integration():

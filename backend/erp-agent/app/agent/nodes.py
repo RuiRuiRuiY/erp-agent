@@ -4,7 +4,7 @@ from langchain_core.messages import SystemMessage
 from langgraph.types import Command, interrupt
 
 from app.agent.state import AgentState
-from app.mcp.client import get as erp_get
+from app.mcp.erp_client import get as erp_get
 from app.mcp.server import override_purchase_order, transit_po_status
 
 

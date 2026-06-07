@@ -10,7 +10,7 @@ import asyncio
 import json
 import sys
 
-from app.mcp.client import get, close_client
+from app.mcp.erp_client import get, close_client
 from app.mcp.server import (
     search_product,
     check_department,

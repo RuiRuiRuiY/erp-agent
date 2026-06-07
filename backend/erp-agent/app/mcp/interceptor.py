@@ -10,7 +10,7 @@ MCP Tool Interceptor: 参数校验与越权拦截 + 异常统一捕获 + 错误�
 import functools
 import json
 
-from app.mcp.client import ErpApiError, ErpConnectionError
+from app.mcp.erp_client import ErpApiError, ErpConnectionError
 
 # ---------------------------------------------------------------------------
 # 错误映射表

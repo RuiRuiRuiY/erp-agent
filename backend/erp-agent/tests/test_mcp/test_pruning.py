@@ -2,7 +2,7 @@
 import asyncio
 import json
 
-from app.mcp.client import get, post
+from app.mcp.erp_client import get, post
 from app.mcp.pruning import prune
 
 

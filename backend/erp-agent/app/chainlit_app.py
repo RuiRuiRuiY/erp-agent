@@ -26,7 +26,7 @@ async def _get_graph():
     if _graph is not None:
         return _graph
 
-    from app.agent.mcp_client import get_mcp_tools
+    from app.mcp.client import get_mcp_tools
 
     tools = cl.user_session.get("mcp_tools")
     if tools is None:

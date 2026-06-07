@@ -51,7 +51,7 @@ import json
 
 from fastmcp import FastMCP
 
-from app.mcp.client import get, post
+from app.mcp.erp_client import get, post
 from app.mcp.interceptor import require_agent_reasoning, enforce_operator_role, catch_erp_error
 
 mcp = FastMCP("mcp-erp-server")
