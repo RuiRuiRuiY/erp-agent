@@ -90,7 +90,7 @@ class TestTransitPurchaseOrderAPI:
         po_id = self._create_po(client, seed_data)
         resp = client.post(f"/api/v1/po/{po_id}/transit", json={
             "target_status": "PENDING",
-            "operator_role": "agent",
+            "operator_role": "purchaser",
         })
         assert resp.status_code == 200
         body = resp.json()
@@ -100,7 +100,7 @@ class TestTransitPurchaseOrderAPI:
     def test_transit_pending_to_approved(self, client, seed_data):
         po_id = self._create_po(client, seed_data)
         client.post(f"/api/v1/po/{po_id}/transit", json={
-            "target_status": "PENDING", "operator_role": "agent",
+            "target_status": "PENDING", "operator_role": "purchaser",
         })
         resp = client.post(f"/api/v1/po/{po_id}/transit", json={
             "target_status": "APPROVED", "operator_role": "finance_manager",
@@ -113,7 +113,7 @@ class TestTransitPurchaseOrderAPI:
         po_id = self._create_po(client, seed_data)
         resp = client.post(f"/api/v1/po/{po_id}/transit", json={
             "target_status": "APPROVED",
-            "operator_role": "agent",
+            "operator_role": "purchaser",
         })
         assert resp.status_code == 409
         assert resp.json()["error_code"] == "INVALID_STATE_TRANSITION"
@@ -121,10 +121,10 @@ class TestTransitPurchaseOrderAPI:
     def test_permission_denied_returns_403(self, client, seed_data):
         po_id = self._create_po(client, seed_data)
         client.post(f"/api/v1/po/{po_id}/transit", json={
-            "target_status": "PENDING", "operator_role": "agent",
+            "target_status": "PENDING", "operator_role": "purchaser",
         })
         resp = client.post(f"/api/v1/po/{po_id}/transit", json={
-            "target_status": "APPROVED", "operator_role": "agent",
+            "target_status": "APPROVED", "operator_role": "purchaser",
         })
         assert resp.status_code == 403
         assert resp.json()["error_code"] == "PERMISSION_DENIED"
@@ -132,7 +132,7 @@ class TestTransitPurchaseOrderAPI:
     def test_nonexistent_po_returns_404(self, client):
         resp = client.post("/api/v1/po/nonexistent-id/transit", json={
             "target_status": "PENDING",
-            "operator_role": "agent",
+            "operator_role": "purchaser",
         })
         assert resp.status_code == 404
         assert resp.json()["error_code"] == "RESOURCE_NOT_FOUND"
@@ -195,7 +195,7 @@ class TestOverridePurchaseOrderAPI:
 
         resp = client.post(f"/api/v1/po/{po_id}/transit", json={
             "target_status": "PENDING",
-            "operator_role": "agent",
+            "operator_role": "purchaser",
         })
         assert resp.status_code == 200
         assert resp.json()["old_status"] == "DRAFT"

@@ -171,7 +171,7 @@ class AgentState(TypedDict):
 
     # --- HITL / 审批 ---
     override_token: str | None                # 人类提供的特批 Token
-    operator_role: str                        # 操作者角色: agent / finance_manager
+    operator_role: str                        # 操作者角色: purchaser / finance_manager
     pending_approval_type: str | None         # 挂起类型: override / transit_approve
 
     # --- 智能分析 ---
@@ -288,7 +288,7 @@ def prune_simulate_response(raw: dict) -> dict:
 | ------------------------- | ----------------- | ------------------------------------------------------------- |
 | `draft_purchase_order`    | `agent_reasoning` | 校验字段非空且长度 > 20 字符，否则返回校验失败                                    |
 | `override_purchase_order` | `override_token`  | LLM 不可传入此参数，由 MCP 从运行时上下文注入                                   |
-| `transit_po_status`       | `operator_role`   | 来源是 Agent → 固定 `"agent"`；来源是 HITL 回调 → 固定 `"finance_manager"` |
+| `transit_po_status`       | `operator_role`   | 来源是 Agent → 固定 `"purchaser"`；来源是 HITL 回调 → 固定 `"finance_manager"` |
 | `search_product`          | 查询范围              | 仅允许 `q` 参数，禁止传入 SQL/注入参数                                      |
 
 ---
@@ -386,7 +386,7 @@ async def on_message(message: cl.Message):
         return
 
     # 正常消息处理...
-    operator_role = cl.user_session.get("operator_role", "agent")
+    operator_role = cl.user_session.get("operator_role", "purchaser")
     # 将 operator_role 注入到 state 中
 ```
 

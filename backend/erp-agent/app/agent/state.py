@@ -29,6 +29,7 @@ class AgentState(TypedDict):
 
     override_token: str | None
     operator_role: str
+    action_source: str
     pending_approval_type: str | None
 
     tier_suggestion: str | None

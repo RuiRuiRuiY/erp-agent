@@ -43,7 +43,7 @@ class PORead(BaseModel):
 
 class TransitStatusRequest(BaseModel):
     target_status: str = Field(description="目标状态")
-    operator_role: str = Field(default="agent", description="操作者角色")
+    operator_role: str = Field(default="purchaser", description="操作者角色")
 
 
 class TransitStatusResponse(BaseModel):

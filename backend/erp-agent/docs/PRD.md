@@ -72,7 +72,7 @@
 
       # --- HITL / 审批 ---
       override_token: str | None                # 人类提供的特批 Token
-      operator_role: str                        # 当前操作者角色 (agent / finance_manager)
+      operator_role: str                        # 当前操作者角色 (purchaser / finance_manager)
 
       # --- 错误自愈 ---
       error_context: dict | None                # 捕获的结构化错误 (含 error_code, context, agent_suggestion)
@@ -94,7 +94,7 @@
   | `simulate_purchase`          | `POST /pricing/simulate`       | **智能摘要化**：保留推荐供应商完整明细；其他供应商仅保留总价、交期和 skipped 原因；保留预算信息。 | 📉 Token 80%  |
   | `draft_purchase_order`       | `POST /po`                     | MCP 层强制校验 `agent_reasoning` 字段是否包含有效推理链，否则拦截重写。                     | 🛡️ 防幻觉     |
   | `override_purchase_order`    | `POST /po/override`            | MCP 层强制注入 `override_token`，LLM 不可操控该参数；校验 token 格式。                      | 🛡️ 防越权     |
-  | `transit_po_status`          | `POST /po/{id}/transit`        | MCP 层**硬编码** `operator_role`，根据路由来源自动决定：Agent 自主流转为 `"agent"`，HITL 回调审批为 `"finance_manager"`。 | 🛡️ 防越权 |
+  | `transit_po_status`          | `POST /po/{id}/transit`        | MCP 层**硬编码** `operator_role`，根据路由来源自动决定：Agent 自主流转为 `"purchaser"`，HITL 回调审批为 `"finance_manager"`。 | 🛡️ 防越权 |
 
 - 核心节点与路由 (HITL 挂起 & operator_role 切换)
 
@@ -102,7 +102,7 @@
 
   - 在 `hitl_override_gate` 节点配置 `interrupt_before`。当预算超标时，Agent 挂起并持久化至 PostgreSQL。
   - 通过 Chainlit `AskActionMessage` 向用户索要 `OVERRIDE_TOKEN`，注入后唤醒 Agent 继续执行。
-  - **operator_role 切换机制**：Agent 自主调用 `transit_po_status` 时 `operator_role="agent"`（仅限 DRAFT→PENDING 等非审批状态流转）。HITL 回调触发审批时，由 Chainlit 或管控台将 `operator_role` 提升为 `"finance_manager"`（对应 APPROVED/REJECTED 状态变更）。MCP 层据此区分"Agent 自主动作"与"人类审批动作"，防止越权。
+  - **operator_role 切换机制**：Agent 自主调用 `transit_po_status` 时 `operator_role="purchaser"`（仅限 DRAFT→PENDING 等非审批状态流转）。HITL 回调触发审批时，由 Chainlit 或管控台将 `operator_role` 提升为 `"finance_manager"`（对应 APPROVED/REJECTED 状态变更）。MCP 层据此区分"Agent 自主动作"与"人类审批动作"，防止越权。
 
 ### 3.4 Agent 行为规范 (新增 — 详见专项文档)
 

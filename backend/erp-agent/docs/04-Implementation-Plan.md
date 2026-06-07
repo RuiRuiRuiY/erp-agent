@@ -268,7 +268,7 @@ gantt
   - 产出: 同文件
   - 验收: 用户点击"拒绝" → Agent 回复"采购已取消"
 
-- [ ] **Task 1.4**: interrupt_before 重构 `[P0 · 1h]` **(Sprint 1 Fix 2)**
+- [x] **Task 1.4**: interrupt_before 重构 `[P0 · 1h]` **(Sprint 1 Fix 2)**
   - 产出: `app/agent/graph.py`
   - 职责:
     1. 将 `hitl_gate` 节点内的 `interrupt()` 调用迁移到 `compile(interrupt_before=["hitl_gate"])`
@@ -277,7 +277,7 @@ gantt
   - 验收: HITL interrupt/resume 闭环走通，测试全部通过
   - 参考: 03-Tech-Arch §4.2
 
-- [ ] **复盘: Day 1**
+- [x] **复盘: Day 1**
   - 验收: Chainlit 可对话，HITL interrupt/resume 闭环走通
 
 ---

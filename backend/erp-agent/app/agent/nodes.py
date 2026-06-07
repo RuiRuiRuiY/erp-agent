@@ -444,6 +444,7 @@ def hitl_gate(state: AgentState) -> dict:
     """HITL 审批门：挂起图等待 override_token，恢复后注入 state 继续执行。
 
     interrupt() 调用后图暂停，resume 时传入 {"override_token": "..."} 或 False。
+    resume 后设置 action_source="human" 标识人类操作。
     """
     if state.get("override_token"):
         return {"pending_approval_type": None}
@@ -459,13 +460,14 @@ def hitl_gate(state: AgentState) -> dict:
         return {
             "override_token": None,
             "pending_approval_type": None,
+            "action_source": "human",
             "messages": [{"role": "assistant", "content": "采购已取消。"}],
         }
 
     if isinstance(token, dict):
         token = token.get("override_token", token)
 
-    return {"override_token": token, "pending_approval_type": None}
+    return {"override_token": token, "pending_approval_type": None, "action_source": "human"}
 
 
 async def override_po(state: AgentState) -> dict:
@@ -530,6 +532,7 @@ async def transit_to_pending(state: AgentState) -> dict:
     """将特批 PO 从 DRAFT 流转到 PENDING（提交审批）。
 
     override 单在 transit 时会跳过预算重校验。
+    operator_role 从 state 读取，默认 "purchaser"。
     """
     po_id = state.get("po_draft_id")
     if not po_id:
@@ -540,7 +543,8 @@ async def transit_to_pending(state: AgentState) -> dict:
             }],
         }
 
-    raw = await transit_po_status(po_id=po_id, target_status="PENDING")
+    role = state.get("operator_role") or "purchaser"
+    raw = await transit_po_status(po_id=po_id, target_status="PENDING", operator_role=role)
     data = json.loads(raw)
 
     if data.get("_error"):

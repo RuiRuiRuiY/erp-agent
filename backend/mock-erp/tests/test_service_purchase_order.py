@@ -156,7 +156,7 @@ class TestTransitPurchaseOrder:
 
     def test_draft_to_pending(self, session, seed_data):
         po_id = self._create_po(session, seed_data)
-        result = transit_po(session, po_id, "PENDING", "agent")
+        result = transit_po(session, po_id, "PENDING", "purchaser")
 
         assert result.old_status == "DRAFT"
         assert result.new_status == "PENDING"
@@ -167,7 +167,7 @@ class TestTransitPurchaseOrder:
 
     def test_draft_to_cancelled(self, session, seed_data):
         po_id = self._create_po(session, seed_data)
-        result = transit_po(session, po_id, "CANCELLED", "agent")
+        result = transit_po(session, po_id, "CANCELLED", "purchaser")
 
         assert result.old_status == "DRAFT"
         assert result.new_status == "CANCELLED"
@@ -181,7 +181,7 @@ class TestTransitPurchaseOrder:
 
     def test_pending_to_approved(self, session, seed_data):
         po_id = self._create_po(session, seed_data)
-        transit_po(session, po_id, "PENDING", "agent")
+        transit_po(session, po_id, "PENDING", "purchaser")
         result = transit_po(session, po_id, "APPROVED", "finance_manager")
 
         assert result.new_status == "APPROVED"
@@ -197,7 +197,7 @@ class TestTransitPurchaseOrder:
 
     def test_pending_to_rejected(self, session, seed_data):
         po_id = self._create_po(session, seed_data)
-        transit_po(session, po_id, "PENDING", "agent")
+        transit_po(session, po_id, "PENDING", "purchaser")
         result = transit_po(session, po_id, "REJECTED", "finance_manager")
 
         assert result.new_status == "REJECTED"
@@ -208,26 +208,26 @@ class TestTransitPurchaseOrder:
 
     def test_pending_to_cancelled(self, session, seed_data):
         po_id = self._create_po(session, seed_data)
-        transit_po(session, po_id, "PENDING", "agent")
-        result = transit_po(session, po_id, "CANCELLED", "agent")
+        transit_po(session, po_id, "PENDING", "purchaser")
+        result = transit_po(session, po_id, "CANCELLED", "purchaser")
 
         assert result.new_status == "CANCELLED"
         assert "已释放冻结预算" in result.budget_impact
 
     def test_rejected_to_draft(self, session, seed_data):
         po_id = self._create_po(session, seed_data)
-        transit_po(session, po_id, "PENDING", "agent")
+        transit_po(session, po_id, "PENDING", "purchaser")
         transit_po(session, po_id, "REJECTED", "finance_manager")
-        result = transit_po(session, po_id, "DRAFT", "agent")
+        result = transit_po(session, po_id, "DRAFT", "purchaser")
 
         assert result.new_status == "DRAFT"
         assert result.budget_impact is None
 
     def test_approved_to_cancelled(self, session, seed_data):
         po_id = self._create_po(session, seed_data)
-        transit_po(session, po_id, "PENDING", "agent")
+        transit_po(session, po_id, "PENDING", "purchaser")
         transit_po(session, po_id, "APPROVED", "finance_manager")
-        result = transit_po(session, po_id, "CANCELLED", "agent")
+        result = transit_po(session, po_id, "CANCELLED", "purchaser")
 
         assert result.new_status == "CANCELLED"
         assert "已退回预算" in result.budget_impact
@@ -240,26 +240,26 @@ class TestTransitPurchaseOrder:
 
     def test_full_lifecycle(self, session, seed_data):
         po_id = self._create_po(session, seed_data)
-        transit_po(session, po_id, "PENDING", "agent")
+        transit_po(session, po_id, "PENDING", "purchaser")
         transit_po(session, po_id, "APPROVED", "finance_manager")
-        transit_po(session, po_id, "ORDERED", "agent")
-        transit_po(session, po_id, "SHIPPED", "agent")
-        result = transit_po(session, po_id, "RECEIVED", "agent")
+        transit_po(session, po_id, "ORDERED", "purchaser")
+        transit_po(session, po_id, "SHIPPED", "purchaser")
+        result = transit_po(session, po_id, "RECEIVED", "purchaser")
 
         assert result.new_status == "RECEIVED"
 
     def test_invalid_transition(self, session, seed_data):
         po_id = self._create_po(session, seed_data)
         with pytest.raises(InvalidStateTransitionError) as exc:
-            transit_po(session, po_id, "APPROVED", "agent")
+            transit_po(session, po_id, "APPROVED", "purchaser")
         assert exc.value.context["current_status"] == "DRAFT"
         assert exc.value.context["target_status"] == "APPROVED"
 
     def test_permission_denied(self, session, seed_data):
         po_id = self._create_po(session, seed_data)
-        transit_po(session, po_id, "PENDING", "agent")
+        transit_po(session, po_id, "PENDING", "purchaser")
         with pytest.raises(PermissionDeniedError) as exc:
-            transit_po(session, po_id, "APPROVED", "agent")
+            transit_po(session, po_id, "APPROVED", "purchaser")
         assert exc.value.context["required_role"] == "finance_manager"
 
     def test_recheck_budget_insufficient(self, session, seed_data):
@@ -271,7 +271,7 @@ class TestTransitPurchaseOrder:
         session.flush()
 
         with pytest.raises(BudgetInsufficientError) as exc:
-            transit_po(session, po_id, "PENDING", "agent")
+            transit_po(session, po_id, "PENDING", "purchaser")
         assert exc.value.context["required"] == 180_000
 
     def test_recheck_stock_insufficient(self, session, seed_data):
@@ -282,7 +282,7 @@ class TestTransitPurchaseOrder:
         session.flush()
 
         with pytest.raises(BusinessException) as exc:
-            transit_po(session, po_id, "PENDING", "agent")
+            transit_po(session, po_id, "PENDING", "purchaser")
         assert exc.value.error_code == "INSUFFICIENT_STOCK"
 
 
@@ -358,7 +358,7 @@ class TestTransitOverridePurchaseOrder:
 
     def test_override_skips_budget_recheck(self, session, seed_data):
         po_id = self._create_override_po(session, seed_data)
-        result = transit_po(session, po_id, "PENDING", "agent")
+        result = transit_po(session, po_id, "PENDING", "purchaser")
 
         assert result.old_status == "DRAFT"
         assert result.new_status == "PENDING"
@@ -374,7 +374,7 @@ class TestTransitOverridePurchaseOrder:
         session.flush()
 
         with pytest.raises(BusinessException) as exc:
-            transit_po(session, po_id, "PENDING", "agent")
+            transit_po(session, po_id, "PENDING", "purchaser")
         assert exc.value.error_code == "INSUFFICIENT_STOCK"
 
     def test_normal_po_transit_still_fails_budget_check(self, session, seed_data):
@@ -392,5 +392,5 @@ class TestTransitOverridePurchaseOrder:
         session.flush()
 
         with pytest.raises(BudgetInsufficientError) as exc:
-            transit_po(session, po_id, "PENDING", "agent")
+            transit_po(session, po_id, "PENDING", "purchaser")
         assert exc.value.context["required"] == 60_000

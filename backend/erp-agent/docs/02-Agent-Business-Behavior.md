@@ -76,7 +76,7 @@ Step 6: draft_purchase_order(department_id="dept_it", supplier_id="sup_a",
         → [异常: INSUFFICIENT_STOCK] → 转入 S2
         → [异常: PRICING_TIER_NOT_FOUND] → 回复"该供应商对此商品暂无报价"
          ↓
-Step 7: transit_po_status("po_xxx", target_status="PENDING", operator_role="agent")
+Step 7: transit_po_status("po_xxx", target_status="PENDING", operator_role="purchaser")
         → 返回 {new_status: "PENDING"}
         → [异常: 409] → 解析错误并回复用户
          ↓
@@ -199,7 +199,7 @@ Step 7 (resume 后): Agent 调用:
                                 override_token="xxx")
         → 返回 PO (status: DRAFT, is_override=True)
 
-Step 8: transit_po_status(po_id, target_status="PENDING", operator_role="agent")
+Step 8: transit_po_status(po_id, target_status="PENDING", operator_role="purchaser")
         → DRAFT → PENDING (override 跳过预算检查, 但仍查库存)
 
 Step 9: 通知用户: "特批已通过, 采购单已提交, 等待财务主管最终审批。"

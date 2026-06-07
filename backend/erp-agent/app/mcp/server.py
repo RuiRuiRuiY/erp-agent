@@ -164,8 +164,8 @@ async def override_purchase_order(
 
 @mcp.tool(description="流转采购订单状态（如 PENDING→APPROVED, APPROVED→ISSUED）")
 @catch_erp_error
-async def transit_po_status(po_id: str, target_status: str) -> str:
-    operator_role = enforce_operator_role()
+async def transit_po_status(po_id: str, target_status: str, operator_role: str = "purchaser") -> str:
+    operator_role = enforce_operator_role(operator_role)
     body = {"target_status": target_status, "operator_role": operator_role}
     data = await post(f"/po/{po_id}/transit", body)
     return json.dumps(data, ensure_ascii=False)

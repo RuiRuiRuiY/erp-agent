@@ -86,7 +86,7 @@ async def main():
     po_id = po["id"]
     print(f"  11. draft_purchase_order     OK  PO={po['po_number']} status={po['status']}")
 
-    tr1 = json.loads(await transit_po_status(po_id=po_id, target_status="PENDING", operator_role="agent"))
+    tr1 = json.loads(await transit_po_status(po_id=po_id, target_status="PENDING", operator_role="purchaser"))
     print(f"  12. transit DRAFT->PENDING   OK  {tr1['old_status']}->{tr1['new_status']}")
 
     tr2 = json.loads(await transit_po_status(po_id=po_id, target_status="APPROVED", operator_role="finance_manager"))

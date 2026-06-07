@@ -49,9 +49,30 @@ async def on_chat_start():
     logger.info("新会话: thread_id=%s", thread_id)
 
 
+_ROLE_MAP = {
+    "采购员": "purchaser",
+    "财务经理": "finance_manager",
+}
+
+
 @cl.on_message
 async def on_message(message: cl.Message):
-    """处理用户消息：调用 LangGraph Agent，支持 HITL 审批弹窗。"""
+    """处理用户消息：支持 /role 命令切换角色，其余消息调用 LangGraph Agent。"""
+    # ── 角色切换命令 ──
+    if message.content.startswith("/role"):
+        parts = message.content.split(maxsplit=1)
+        if len(parts) < 2:
+            await cl.Message(content="用法: /role 采购员 或 /role 财务经理").send()
+            return
+        role_name = parts[1].strip()
+        role_value = _ROLE_MAP.get(role_name)
+        if not role_value:
+            await cl.Message(content=f"未知角色: {role_name}。可用角色: {', '.join(_ROLE_MAP.keys())}").send()
+            return
+        cl.user_session.set("operator_role", role_value)
+        await cl.Message(content=f"已切换到角色: {role_name}（{role_value}）").send()
+        return
+
     thread_id = cl.user_session.get("thread_id")
     if not thread_id:
         thread_id = str(uuid4())
@@ -63,9 +84,11 @@ async def on_message(message: cl.Message):
         **make_langfuse_config(),
     }
 
+    operator_role = cl.user_session.get("operator_role", "purchaser")
+
     try:
         result = await graph.ainvoke(
-            {"messages": [HumanMessage(content=message.content)]},
+            {"messages": [HumanMessage(content=message.content)], "operator_role": operator_role, "action_source": "ai"},
             config,
         )
     except Exception as e:
