@@ -248,13 +248,13 @@ gantt
   - 验收: 13 个测试全部通过 → ✅
   - 参考: 03-Tech-Arch §一（混合架构节点图）
 
-- [ ] **Task 1.1**: Chainlit 基础集成 `[P0 · 1h]`
+- [x] **Task 1.1**: Chainlit 基础集成 `[P0 · 1h]`
   - 产出: `app/chainlit_app.py` (Chainlit 入口)
   - 职责:
     1. `@cl.on_chat_start` 初始化 thread_id
     2. `@cl.on_message` 接收用户消息，调用 LangGraph
     3. 流式输出结果
-  - 验收: Chainlit 启动，用户可发送消息并收到 Agent 回复
+  - 验收: Chainlit 启动，用户可发送消息并收到 Agent 回复 → ✅ 13 个测试通过
 
 - [ ] **Task 1.2**: HITL 审批弹窗集成 `[P0 · 1h]`
   - 产出: 同文件

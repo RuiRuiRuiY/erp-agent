@@ -13,6 +13,7 @@ dependencies = [
     "fastmcp>=3.3.1",
     "psycopg-binary>=3.3.4",
     "fastapi[standard]>=0.136.3",
+    "chainlit>=2.0",
 ]
 
 [tool.pytest.ini_options]
