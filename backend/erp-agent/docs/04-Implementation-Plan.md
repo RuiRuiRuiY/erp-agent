@@ -350,9 +350,10 @@ gantt
   - 实现: LLM 结构化输出 `{"intent": "confirm"/"new_request"/"modify"}`，confirm 时不提取字段
   - 验收: "就按这个来" → intent=confirm → 沿用当前 State，测试通过
 
-- [ ] **Task 3.2**: 上下文清理策略 `[P1 · 20min]`
+- [x] **Task 3.2**: 上下文清理策略 `[P1 · 20min]` ✅
   - 产出: `app/chainlit_app.py`
-  - 验收: 用户要求重置 → 新 Thread
+  - 实现: `/reset` 或 `重置` 命令 → 生成新 thread_id，清空 LangGraph 状态
+  - 验收: `/reset` 后新会话状态独立，不受旧会话污染 → 测试通过
 
 - [x] **复盘: Day 3** ✅
 
@@ -363,23 +364,25 @@ gantt
 | Task | 预估 | 实际 | 状态 |
 |------|------|------|------|
 | Task 3.1 用户模糊输入处理 | 30min | 30min | ✅ |
-| Task 3.2 上下文清理策略 | 20min | — | 待定 |
+| Task 3.2 上下文清理策略 | 20min | 15min | ✅ |
 
 **关键产出**：
 - `parse_input` 结构化 intent 输出（confirm/new_request/modify）
-- `test_s6_fuzzy_input_preserves_state` e2e 测试
+- `/reset` 命令支持（新 thread_id，状态清空）
+- `test_s6_fuzzy_input_preserves_state` + `test_s7_reset_creates_new_thread_state` e2e 测试
 
 **经验教训**：
 - 硬编码短语列表不可靠 → 结构化 LLM 输出更稳健
 - truthy 检查不能完全规避 LLM 幻觉风险 → 需在调 LLM 前/中通过 intent 类型控制
 - 模糊输入处理应从"绕过 LLM"改为"让 LLM 显式声明意图"
+- 上下文清理只需更换 thread_id，LangGraph Checkpointer 自动隔离状态
 
 **量化成果**：
-- 测试：20 → 21 个（+1 S6 模糊输入）
+- 测试：20 → 22 个（+1 S6 模糊输入 +1 S7 重置）
 
 ---
 
-🏆 **Sprint 2 里程碑**：Chainlit 端跑通全部 5 场景，HITL 审批弹窗交互闭环，角色切换正常。
+🏆 **Sprint 2 里程碑**：Chainlit 端跑通全部 5 场景，HITL 审批弹窗交互闭环，角色切换正常，模糊输入处理 + 上下文清理策略完成。
 
 ---
 
@@ -505,9 +508,9 @@ services:
 | MCP 单元测试 | pytest + httpx | Day 3 | — | — |
 | HITL 审批测试 | pytest + Chainlit | — | Day 1 | — |
 | 全链路集成 | 手动 + 脚本 | Day 5 | Day 2 | Day 4 |
-| E2E (Chainlit) | 手动 | — | Day 2 (6) | Day 4 |
+| E2E (Chainlit) | 手动 | — | Day 2 (7) | Day 4 |
 
-**当前测试总数**: 21 个（Sprint 2 Day 3 结束）
+**当前测试总数**: 22 个（Sprint 2 Day 3 结束）
 
 ---
 

@@ -57,7 +57,7 @@ _ROLE_MAP = {
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    """处理用户消息：支持 /role 命令切换角色，其余消息调用 LangGraph Agent。"""
+    """处理用户消息：支持 /role、/reset 命令，其余消息调用 LangGraph Agent。"""
     # ── 角色切换命令 ──
     if message.content.startswith("/role"):
         parts = message.content.split(maxsplit=1)
@@ -71,6 +71,14 @@ async def on_message(message: cl.Message):
             return
         cl.user_session.set("operator_role", role_value)
         await cl.Message(content=f"已切换到角色: {role_name}（{role_value}）").send()
+        return
+
+    # ── 重置命令 ──
+    if message.content.strip() in ("/reset", "重置"):
+        new_thread_id = str(uuid4())
+        cl.user_session.set("thread_id", new_thread_id)
+        logger.info("会话重置: new_thread_id=%s", new_thread_id)
+        await cl.Message(content="会话已重置，开始新的对话。").send()
         return
 
     thread_id = cl.user_session.get("thread_id")

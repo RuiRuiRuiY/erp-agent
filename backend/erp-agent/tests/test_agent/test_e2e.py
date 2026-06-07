@@ -366,3 +366,55 @@ async def test_s6_fuzzy_input_preserves_state():
     # parse_input 返回 user_intent + messages，不覆盖 department_id / cart_items
     assert final.values.get("department_id") == "dept_it"
     assert len(final.values.get("cart_items", [])) == 1
+
+
+# ── S7: 会话重置 ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_s7_reset_creates_new_thread_state():
+    """S7: /reset 后使用新 thread_id → 状态清空，不受旧会话影响"""
+    tools = _make_tools()
+
+    mock_llm = _mock_llm_factory([
+        AIMessage(content=json.dumps({
+            "intent": "new_request",
+            "department_id": "dept_sales",
+            "cart_items": [{"product_id": "p001", "product_name": "显示器", "quantity": 2}],
+        })),
+        AIMessage(content="", tool_calls=[{
+            "id": "call_s7_1", "name": "simulate_purchase",
+            "args": {"department_id": "dept_sales", "items": [{"product_id": "p001", "quantity": 2}]},
+        }]),
+        AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n显示器报价正常'),
+    ])
+
+    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+        graph = build_graph(tools=tools)
+
+        # 模拟旧会话
+        old_config = {"configurable": {"thread_id": "e2e-s7-old"}}
+        old_initial = AgentState(
+            messages=[HumanMessage(content="买显示器")],
+            department_id="dept_it",
+            cart_items=[{"product_id": "p001", "product_name": "显示器", "quantity": 3}],
+        )
+        async for _ in graph.astream(old_initial, old_config, stream_mode="updates"):
+            pass
+
+        # 模拟 /reset：新 thread_id + 全新初始状态
+        new_thread_id = "e2e-s7-new"
+        new_config = {"configurable": {"thread_id": new_thread_id}}
+        new_initial = AgentState(
+            messages=[HumanMessage(content="买椅子")],
+            department_id="dept_sales",
+            cart_items=[{"product_id": "p002", "product_name": "椅子", "quantity": 5}],
+        )
+        async for _ in graph.astream(new_initial, new_config, stream_mode="updates"):
+            pass
+
+    # 新会话独立：department_id 来自新会话，不被旧会话污染
+    final = await graph.aget_state(new_config)
+    assert final.values.get("department_id") == "dept_sales"
+    assert len(final.values.get("cart_items", [])) == 1
+    assert final.values["cart_items"][0]["product_id"] == "p002"
