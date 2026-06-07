@@ -98,6 +98,7 @@ async def test_s1_regular_purchase_e2e():
     tools = _make_tools()
     mock_llm = _mock_llm_factory([
         AIMessage(content=json.dumps({
+            "intent": "new_request",
             "department_id": "dept_it",
             "cart_items": [{"product_id": "p001", "product_name": "显示器", "quantity": 5}],
         })),
@@ -136,6 +137,7 @@ async def test_s2_insufficient_stock_e2e():
     tools = _make_tools(inventory_response=inventory_resp)
     mock_llm = _mock_llm_factory([
         AIMessage(content=json.dumps({
+            "intent": "new_request",
             "department_id": "dept_it",
             "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
         })),
@@ -177,6 +179,7 @@ async def test_s3_hitl_approval_e2e():
     tools = _make_tools(draft_response=draft_resp)
     mock_llm = _mock_llm_factory([
         AIMessage(content=json.dumps({
+            "intent": "new_request",
             "department_id": "dept_rd",
             "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
         })),
@@ -247,6 +250,7 @@ async def test_s4_tiered_pricing_e2e():
     tools = _make_tools(simulate_response=simulate_resp)
     mock_llm = _mock_llm_factory([
         AIMessage(content=json.dumps({
+            "intent": "new_request",
             "department_id": "dept_it",
             "cart_items": [{"product_id": "p004", "product_name": "鼠标", "quantity": 80}],
         })),
@@ -304,6 +308,7 @@ async def test_s5_multi_supplier_e2e():
     tools = _make_tools(simulate_response=simulate_resp)
     mock_llm = _mock_llm_factory([
         AIMessage(content=json.dumps({
+            "intent": "new_request",
             "department_id": "dept_it",
             "cart_items": [{"product_id": "p005", "product_name": "键盘", "quantity": 5}],
         })),
@@ -329,3 +334,35 @@ async def test_s5_multi_supplier_e2e():
     final = await graph.aget_state(config)
     contents = _get_final_msgs(final)
     assert any("供应商选项" in c for c in contents), f"应展示供应商选项, got: {contents}"
+
+
+# ── S6: 模糊输入 ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_s6_fuzzy_input_preserves_state():
+    """S6: 模糊输入（'就按这个来'）→ intent=confirm → 沿用当前 State"""
+    tools = _make_tools()
+    # parse_input: intent=confirm → 不提取字段
+    # call_model: 正常响应
+    mock_llm = _mock_llm_factory([
+        AIMessage(content='{"intent": "confirm"}\n用户确认继续当前采购流程'),
+        AIMessage(content="继续当前采购流程"),
+    ])
+
+    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+        graph = build_graph(tools=tools)
+        initial = AgentState(
+            messages=[HumanMessage(content="就按这个来")],
+            department_id="dept_it",
+            cart_items=[{"product_id": "p001", "product_name": "显示器", "quantity": 5}],
+        )
+        config = {"configurable": {"thread_id": "e2e-s6"}}
+
+        async for _ in graph.astream(initial, config, stream_mode="updates"):
+            pass
+
+    final = await graph.aget_state(config)
+    # parse_input 返回 user_intent + messages，不覆盖 department_id / cart_items
+    assert final.values.get("department_id") == "dept_it"
+    assert len(final.values.get("cart_items", [])) == 1

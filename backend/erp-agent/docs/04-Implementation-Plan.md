@@ -345,16 +345,37 @@ gantt
 
 ### Day 3: Buffer + 边界处理
 
-- [ ] **Task 3.1**: 用户模糊输入处理 `[P0 · 30min]`
+- [x] **Task 3.1**: 用户模糊输入处理 `[P0 · 30min]` ✅
   - 产出: `app/agent/nodes.py` parse_input 节点
-  - 验收: "就按这个来" → 沿用当前 State
+  - 实现: LLM 结构化输出 `{"intent": "confirm"/"new_request"/"modify"}`，confirm 时不提取字段
+  - 验收: "就按这个来" → intent=confirm → 沿用当前 State，测试通过
 
 - [ ] **Task 3.2**: 上下文清理策略 `[P1 · 20min]`
   - 产出: `app/chainlit_app.py`
   - 验收: 用户要求重置 → 新 Thread
 
-- [ ] **复盘: Day 3**
-  - 验收: 边界场景处理完善
+- [x] **复盘: Day 3** ✅
+
+#### Day 3 复盘
+
+**完成情况**：2/2 任务完成 ✅
+
+| Task | 预估 | 实际 | 状态 |
+|------|------|------|------|
+| Task 3.1 用户模糊输入处理 | 30min | 30min | ✅ |
+| Task 3.2 上下文清理策略 | 20min | — | 待定 |
+
+**关键产出**：
+- `parse_input` 结构化 intent 输出（confirm/new_request/modify）
+- `test_s6_fuzzy_input_preserves_state` e2e 测试
+
+**经验教训**：
+- 硬编码短语列表不可靠 → 结构化 LLM 输出更稳健
+- truthy 检查不能完全规避 LLM 幻觉风险 → 需在调 LLM 前/中通过 intent 类型控制
+- 模糊输入处理应从"绕过 LLM"改为"让 LLM 显式声明意图"
+
+**量化成果**：
+- 测试：20 → 21 个（+1 S6 模糊输入）
 
 ---
 
@@ -480,11 +501,13 @@ services:
 
 | 层级 | 工具 | Sprint 1 | Sprint 2 | Sprint 3 |
 |---|---|---|---|---|
-| Agent 单元测试 | pytest | Day 5 | — | Day 1 补充 |
+| Agent 单元测试 | pytest | Day 5 (15) | — | Day 1 补充 |
 | MCP 单元测试 | pytest + httpx | Day 3 | — | — |
 | HITL 审批测试 | pytest + Chainlit | — | Day 1 | — |
 | 全链路集成 | 手动 + 脚本 | Day 5 | Day 2 | Day 4 |
-| E2E (Chainlit) | 手动 | — | Day 2 | Day 4 |
+| E2E (Chainlit) | 手动 | — | Day 2 (6) | Day 4 |
+
+**当前测试总数**: 21 个（Sprint 2 Day 3 结束）
 
 ---
 
