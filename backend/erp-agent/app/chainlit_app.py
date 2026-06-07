@@ -2,7 +2,7 @@
 
 启动方式:
     cd backend/erp-agent
-    chainlit run app/chainlit_app.py
+    chainlit run app/chainlit_app.py --port 8001
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import chainlit as cl
 from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 
 from app.agent.graph import build_graph, make_langfuse_config
 
@@ -50,7 +51,7 @@ async def on_chat_start():
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    """处理用户消息：调用 LangGraph Agent。"""
+    """处理用户消息：调用 LangGraph Agent，支持 HITL 审批弹窗。"""
     thread_id = cl.user_session.get("thread_id")
     if not thread_id:
         thread_id = str(uuid4())
@@ -72,15 +73,103 @@ async def on_message(message: cl.Message):
         await cl.Message(content=f"抱歉，处理您的请求时出现错误：{e}").send()
         return
 
-    # 提取最后一条 assistant 消息
+    # 检查是否被 interrupt() 暂停（HITL 审批场景）
+    interrupts = result.get("__interrupt__")
+    if interrupts:
+        await _handle_interrupts(graph, config, interrupts)
+        return
+
+    # 正常流程：提取最后一条 assistant 消息
+    reply = _extract_reply(result)
+    await cl.Message(content=reply).send()
+
+
+async def _handle_interrupts(graph, config, interrupts):
+    """处理 interrupt：弹出审批框，用户批准后 resume。"""
+    interrupt_obj = interrupts[0] if isinstance(interrupts, list) else interrupts
+    interrupt_value = getattr(interrupt_obj, "value", interrupt_obj)
+
+    # 提取审批信息
+    pending_type = "unknown"
+    request_msg = "需要您的审批"
+    if isinstance(interrupt_value, dict):
+        pending_type = interrupt_value.get("pending_type", "unknown")
+        request_msg = interrupt_value.get("message", request_msg)
+
+    # 弹出 Chainlit 审批确认框
+    approve_action = cl.Action(
+        name="approve_override",
+        label="批准",
+        payload={"approve": True},
+        description="批准特批采购",
+    )
+    reject_action = cl.Action(
+        name="reject_override",
+        label="拒绝",
+        payload={"approve": False},
+        description="拒绝特批采购",
+    )
+
+    await cl.Message(
+        content=f"**HITL 审批请求**\n\n类型: {pending_type}\n{request_msg}\n\n请点击「批准」或「拒绝」：",
+        actions=[approve_action, reject_action],
+    ).send()
+
+
+@cl.action_callback("approve_override")
+async def on_approve(action: cl.Action):
+    """用户点击「批准」：resume 图执行。"""
+    thread_id = cl.user_session.get("thread_id")
+    graph = await _get_graph()
+    config = {
+        "configurable": {"thread_id": thread_id},
+        **make_langfuse_config(),
+    }
+
+    try:
+        result = await graph.ainvoke(Command(resume=True), config)
+    except Exception as e:
+        logger.exception("Resume 失败")
+        await cl.Message(content=f"恢复执行失败：{e}").send()
+        return
+
+    # 检查是否还有后续 interrupt
+    interrupts = result.get("__interrupt__")
+    if interrupts:
+        await _handle_interrupts(graph, config, interrupts)
+        return
+
+    reply = _extract_reply(result)
+    await cl.Message(content=reply).send()
+
+
+@cl.action_callback("reject_override")
+async def on_reject(action: cl.Action):
+    """用户点击「拒绝」：resume 图但传入拒绝信号。"""
+    thread_id = cl.user_session.get("thread_id")
+    graph = await _get_graph()
+    config = {
+        "configurable": {"thread_id": thread_id},
+        **make_langfuse_config(),
+    }
+
+    try:
+        result = await graph.ainvoke(Command(resume=False), config)
+    except Exception as e:
+        logger.exception("Resume 失败")
+        await cl.Message(content=f"恢复执行失败：{e}").send()
+        return
+
+    reply = _extract_reply(result)
+    if not reply:
+        reply = "采购已取消。"
+    await cl.Message(content=reply).send()
+
+
+def _extract_reply(result: dict) -> str:
+    """从 graph result 提取最后一条 assistant 消息。"""
     messages = result.get("messages", [])
-    reply = ""
     for msg in reversed(messages):
         if getattr(msg, "type", "") == "ai" and getattr(msg, "content", ""):
-            reply = msg.content
-            break
-
-    if not reply:
-        reply = "抱歉，我无法处理您的请求。"
-
-    await cl.Message(content=reply).send()
+            return msg.content
+    return ""
