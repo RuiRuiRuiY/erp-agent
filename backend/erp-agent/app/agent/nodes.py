@@ -443,7 +443,7 @@ def budget_check(state: AgentState) -> dict:
 def hitl_gate(state: AgentState) -> dict:
     """HITL 审批门：挂起图等待 override_token，恢复后注入 state 继续执行。
 
-    interrupt() 调用后图暂停，resume 时传入 {"override_token": "..."}。
+    interrupt() 调用后图暂停，resume 时传入 {"override_token": "..."} 或 False。
     """
     if state.get("override_token"):
         return {"pending_approval_type": None}
@@ -453,6 +453,15 @@ def hitl_gate(state: AgentState) -> dict:
         "request": "override_token",
         "message": "需要财务主管审批（override_token）后才能继续",
     })
+
+    # 用户拒绝
+    if token is False:
+        return {
+            "override_token": None,
+            "pending_approval_type": None,
+            "messages": [{"role": "assistant", "content": "采购已取消。"}],
+        }
+
     if isinstance(token, dict):
         token = token.get("override_token", token)
 

@@ -264,7 +264,7 @@ gantt
     3. 用户点击"批准"后调用 `Command(resume=True)` 唤醒 Thread
   - 验收: 预算超标场景 → 弹窗 → 批准 → resume → 建单成功
 
-- [ ] **Task 1.3**: HITL 拒绝处理 `[P1 · 20min]`
+- [x] **Task 1.3**: HITL 拒绝处理 `[P1 · 20min]` ✅
   - 产出: 同文件
   - 验收: 用户点击"拒绝" → Agent 回复"采购已取消"
 
