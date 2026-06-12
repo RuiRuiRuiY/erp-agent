@@ -5,6 +5,7 @@ description = "Mock ERP system for LLM Agent tool-calling evaluation"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi[standard]>=0.136.3",
+    "sqladmin>=0.27.2",
     "sqlmodel>=0.0.38",
 ]
 

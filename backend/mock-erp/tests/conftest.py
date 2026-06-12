@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from app.model import (
+    AdminUser,  # noqa: F401  # registers with SQLModel.metadata
     Budget,
     Department,
     Inventory,

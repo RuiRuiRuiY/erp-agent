@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.database import DB_PATH, engine, init_db
 from app.model import (
+    AdminUser,
     Budget,
     Department,
     Inventory,
@@ -169,6 +170,15 @@ def seed() -> None:
             ))
             print(f"    {note}")
         print("  inventory: 6")
+
+        # -- admin users --
+        admin_users = [
+            AdminUser(username="admin", hashed_password="admin123", role="admin"),
+            AdminUser(username="finance", hashed_password="finance123", role="finance_manager"),
+        ]
+        for u in admin_users:
+            session.add(u)
+        print(f"  admin_users: {len(admin_users)}")
 
         session.commit()
         print(f"\n[OK] DB seeded: {DB_PATH}")

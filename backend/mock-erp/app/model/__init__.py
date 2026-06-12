@@ -1,3 +1,4 @@
+from .admin import AdminUser
 from .base import Base
 from .budget import Budget
 from .department import Department
@@ -8,6 +9,7 @@ from .supplier import Supplier
 from .supplier_pricelist import SupplierPricelist
 
 __all__ = [
+    "AdminUser",
     "Base",
     "Product",
     "Supplier",
