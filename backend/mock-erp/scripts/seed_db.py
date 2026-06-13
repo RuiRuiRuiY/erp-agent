@@ -14,6 +14,7 @@ from app.model import (
     Supplier,
     SupplierPricelist,
 )
+import bcrypt as _bcrypt
 from sqlmodel import Session
 
 # ---------------------------------------------------------------------------
@@ -173,8 +174,8 @@ def seed() -> None:
 
         # -- admin users --
         admin_users = [
-            AdminUser(username="admin", hashed_password="admin123", role="admin"),
-            AdminUser(username="finance", hashed_password="finance123", role="finance_manager"),
+            AdminUser(username="admin", hashed_password=_bcrypt.hashpw(b"admin123", _bcrypt.gensalt()).decode(), role="admin"),
+            AdminUser(username="finance", hashed_password=_bcrypt.hashpw(b"finance123", _bcrypt.gensalt()).decode(), role="finance_manager"),
         ]
         for u in admin_users:
             session.add(u)

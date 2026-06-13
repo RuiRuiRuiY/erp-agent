@@ -1,4 +1,5 @@
 """Sprint 3 Task 1.3: 视图级 RBAC 测试"""
+import bcrypt as _bcrypt
 
 
 class TestDashboardRBAC:
@@ -6,7 +7,9 @@ class TestDashboardRBAC:
         """财务经理可以看到采购单页面"""
         from app.model.admin import AdminUser
         session.add(AdminUser(
-            username="finance", hashed_password="pw", role="finance_manager",
+            username="finance",
+            hashed_password=_bcrypt.hashpw(b"pw", _bcrypt.gensalt()).decode(),
+            role="finance_manager",
         ))
         session.commit()
 
@@ -24,7 +27,9 @@ class TestDashboardRBAC:
         """采购员不能看到管理员用户页面"""
         from app.model.admin import AdminUser
         session.add(AdminUser(
-            username="buyer", hashed_password="pw", role="purchaser",
+            username="buyer",
+            hashed_password=_bcrypt.hashpw(b"pw", _bcrypt.gensalt()).decode(),
+            role="purchaser",
         ))
         session.commit()
 
@@ -33,8 +38,8 @@ class TestDashboardRBAC:
         })
         token = resp.json()["token"]
 
-        # 采购员访问管理员用户页面应被拒绝
-        resp = client.get("/admin/admin-user/list", cookies={"session": token})
+        # 采购员访问管理员用户页面应被拒绝（重定向到登录页）
+        resp = client.get("/admin/admin-user/list", cookies={"session": token}, follow_redirects=False)
         assert resp.status_code in (302, 403, 401)
 
     def test_unauthenticated_cannot_see_admin(self, client):

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+import bcrypt as _bcrypt
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -21,7 +22,7 @@ def login(body: LoginRequest, session: Session = Depends(get_db_session)):
 
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
-    if body.password != user.hashed_password:
+    if not _bcrypt.checkpw(body.password.encode(), user.hashed_password.encode()):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     from starlette.responses import JSONResponse
