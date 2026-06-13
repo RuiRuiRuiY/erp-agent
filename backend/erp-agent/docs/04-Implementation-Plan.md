@@ -392,15 +392,15 @@ gantt
 
 ### Day 1: SQLAdmin 管控台 + RBAC
 
-- [ ] **Task 1.1**: `AdminUser` 单表 + 登录接口 `[P0 · 40min]`
+- [x] **Task 1.1**: `AdminUser` 单表 + 登录接口 `[P0 · 40min]`
   - 产出: mock-erp `app/model/admin.py` + 登录 router
   - 验收: 登录/登出正常
 
-- [ ] **Task 1.2**: SQLAdmin ModelView 配置 `[P0 · 1h]`
+- [x] **Task 1.2**: SQLAdmin ModelView 配置 `[P0 · 1h]`
   - 产出: `mock-erp/app/dashboard/` 目录
   - 验收: PO、商品等页面可读写
 
-- [ ] **Task 1.3**: `is_accessible` 视图级 RBAC `[P0 · 30min]`
+- [x] **Task 1.3**: `is_accessible` 视图级 RBAC `[P0 · 30min]`
   - 产出: 同上目录
   - 验收: finance 角色看不到"强行审批"按钮
 

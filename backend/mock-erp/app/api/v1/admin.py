@@ -24,4 +24,8 @@ def login(body: LoginRequest, session: Session = Depends(get_db_session)):
     if body.password != user.hashed_password:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    return {"token": f"admin-{user.id}", "role": user.role}
+    from starlette.responses import JSONResponse
+    response = JSONResponse(content={"token": f"admin-{user.id}", "role": user.role})
+    response.set_cookie(key="session", value=f"admin-{user.id}", httponly=True)
+    response.set_cookie(key="role", value=user.role, httponly=True)
+    return response
