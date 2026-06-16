@@ -12,8 +12,9 @@ from unittest.mock import AsyncMock, patch
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.state import AgentState
+from app.agent.schemas import AnalysisResult, Intent, ParseResult
 from app.agent.graph import build_graph
-from tests.fixtures import make_mock_tools, make_mock_llm
+from tests.fixtures import make_mock_tools, make_structured_mock_llm
 
 
 async def test_s4_tiered_pricing():
@@ -26,17 +27,14 @@ async def test_s4_tiered_pricing():
         }],
     })
     tools = make_mock_tools(simulate_response=simulate_resp)
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_it",
-            "cart_items": [{"product_id": "p004", "product_name": "鼠标", "quantity": 80}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_it",
+                    cart_items=[{"product_id": "p004", "product_name": "鼠标", "quantity": 80}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_001", "name": "simulate_purchase",
             "args": {"department_id": "dept_it", "items": [{"product_id": "p004", "quantity": 80}]},
         }]),
-        AIMessage(content='{"has_tier_opportunity": true, "has_stock_risk": false}\n有阶梯价机会：80个×100元 vs 100个×80元'),
+        AnalysisResult(has_tier_opportunity=True, has_stock_risk=False),
     ])
     pricelist = [
         {"min_qty": 1, "unit_price": 100.0},

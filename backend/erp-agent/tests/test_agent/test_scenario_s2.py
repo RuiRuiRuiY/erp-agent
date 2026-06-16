@@ -12,8 +12,9 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.state import AgentState
+from app.agent.schemas import Intent, ParseResult
 from app.agent.graph import build_graph
-from tests.fixtures import make_mock_tools, make_mock_llm
+from tests.fixtures import make_mock_tools, make_structured_mock_llm
 
 
 async def test_s2_insufficient_stock():
@@ -22,12 +23,9 @@ async def test_s2_insufficient_stock():
         "context": {"product_id": "p003", "requested": 10, "available": 5},
     })
     tools = make_mock_tools(inventory_response=inventory_resp)
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_it",
-            "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_it",
+                    cart_items=[{"product_id": "p003", "product_name": "椅子", "quantity": 10}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_001", "name": "check_inventory",
             "args": {"product_id": "p003"},

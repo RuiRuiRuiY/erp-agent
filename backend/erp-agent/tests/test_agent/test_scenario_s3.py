@@ -10,8 +10,9 @@ from langgraph.types import Command
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.state import AgentState
+from app.agent.schemas import Intent, ParseResult
 from app.agent.graph import build_graph
-from tests.fixtures import make_mock_tools, make_mock_llm
+from tests.fixtures import make_mock_tools, make_structured_mock_llm
 
 
 async def _mock_override_po(**kwargs) -> str:
@@ -39,12 +40,9 @@ async def test_s3_hitl_approval():
         "context": {"required": 6000.0, "remaining": 5000.0, "deficit": 1000.0},
     })
     tools = make_mock_tools(draft_response=draft_resp)
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_rd",
-            "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_rd",
+                    cart_items=[{"product_id": "p003", "product_name": "椅子", "quantity": 10}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_001", "name": "draft_purchase_order",
             "args": {"department_id": "dept_rd", "supplier_id": "sup_c",

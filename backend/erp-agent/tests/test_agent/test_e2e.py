@@ -11,8 +11,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
 
 from app.agent.graph import build_graph
+from app.agent.schemas import AnalysisResult, Intent, ParseResult
 from app.agent.state import AgentState
-from tests.fixtures import make_mock_tools, make_mock_llm
+from tests.fixtures import make_mock_tools, make_structured_mock_llm
 
 
 def _get_final_msgs(final):
@@ -28,17 +29,15 @@ def _get_final_msgs(final):
 async def test_s1_regular_purchase_e2e():
     """S1: 用户消息 → parse_input → call_model(simulate) → analyze_simulate → present_options → END"""
     tools = make_mock_tools()
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_it",
-            "cart_items": [{"product_id": "p001", "product_name": "显示器", "quantity": 5}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_it",
+                    cart_items=[{"product_id": "p001", "product_name": "显示器", "quantity": 5}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_001", "name": "simulate_purchase",
             "args": {"department_id": "dept_it", "items": [{"product_id": "p001", "quantity": 5}]},
         }]),
-        AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n单供应商报价，无阶梯价机会，库存充足'),
+        AnalysisResult(has_tier_opportunity=False, has_stock_risk=False),
+        AIMessage(content="请选择供应商编号，或输入其他条件重新试算。"),
     ])
 
     with patch("app.agent.llm._get_llm", return_value=mock_llm):
@@ -67,12 +66,9 @@ async def test_s2_insufficient_stock_e2e():
         "context": {"product_id": "p003", "requested": 10, "available": 5},
     })
     tools = make_mock_tools(inventory_response=inventory_resp)
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_it",
-            "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_it",
+                    cart_items=[{"product_id": "p003", "product_name": "椅子", "quantity": 10}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_002", "name": "check_inventory",
             "args": {"product_id": "p003"},
@@ -109,12 +105,9 @@ async def test_s3_hitl_approval_e2e():
         "context": {"required": 6000.0, "remaining": 5000.0, "deficit": 1000.0},
     })
     tools = make_mock_tools(draft_response=draft_resp)
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_rd",
-            "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_rd",
+                    cart_items=[{"product_id": "p003", "product_name": "椅子", "quantity": 10}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_003", "name": "draft_purchase_order",
             "args": {"department_id": "dept_rd", "supplier_id": "sup_c",
@@ -180,17 +173,14 @@ async def test_s4_tiered_pricing_e2e():
         }],
     })
     tools = make_mock_tools(simulate_response=simulate_resp)
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_it",
-            "cart_items": [{"product_id": "p004", "product_name": "鼠标", "quantity": 80}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_it",
+                    cart_items=[{"product_id": "p004", "product_name": "鼠标", "quantity": 80}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_004", "name": "simulate_purchase",
             "args": {"department_id": "dept_it", "items": [{"product_id": "p004", "quantity": 80}]},
         }]),
-        AIMessage(content='{"has_tier_opportunity": true, "has_stock_risk": false}\n有阶梯价机会：80个×100元 vs 100个×80元'),
+        AnalysisResult(has_tier_opportunity=True, has_stock_risk=False),
     ])
 
     async def mock_erp_get(path, params=None):
@@ -238,17 +228,15 @@ async def test_s5_multi_supplier_e2e():
         ],
     })
     tools = make_mock_tools(simulate_response=simulate_resp)
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_it",
-            "cart_items": [{"product_id": "p005", "product_name": "键盘", "quantity": 5}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_it",
+                    cart_items=[{"product_id": "p005", "product_name": "键盘", "quantity": 5}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_005", "name": "simulate_purchase",
             "args": {"department_id": "dept_it", "items": [{"product_id": "p005", "quantity": 5}]},
         }]),
-        AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n多供应商报价，各有优势：SUP_A价格低，SUP_C交期快评分高'),
+        AnalysisResult(has_tier_opportunity=False, has_stock_risk=False),
+        AIMessage(content="请选择供应商编号，或输入其他条件重新试算。"),
     ])
 
     with patch("app.agent.llm._get_llm", return_value=mock_llm):
@@ -275,10 +263,8 @@ async def test_s5_multi_supplier_e2e():
 async def test_s6_fuzzy_input_preserves_state():
     """S6: 模糊输入（'就按这个来'）→ intent=confirm → 沿用当前 State"""
     tools = make_mock_tools()
-    # parse_input: intent=confirm → 不提取字段
-    # call_model: 正常响应
-    mock_llm = make_mock_llm([
-        AIMessage(content='{"intent": "confirm"}\n用户确认继续当前采购流程'),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.CONFIRM),
         AIMessage(content="继续当前采购流程"),
     ])
 
@@ -308,17 +294,25 @@ async def test_s7_reset_creates_new_thread_state():
     """S7: /reset 后使用新 thread_id → 状态清空，不受旧会话影响"""
     tools = make_mock_tools()
 
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_sales",
-            "cart_items": [{"product_id": "p001", "product_name": "显示器", "quantity": 2}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        # 旧会话
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_it",
+                    cart_items=[{"product_id": "p001", "product_name": "显示器", "quantity": 3}]),
         AIMessage(content="", tool_calls=[{
-            "id": "call_s7_1", "name": "simulate_purchase",
-            "args": {"department_id": "dept_sales", "items": [{"product_id": "p001", "quantity": 2}]},
+            "id": "call_old_1", "name": "simulate_purchase",
+            "args": {"department_id": "dept_it", "items": [{"product_id": "p001", "quantity": 3}]},
         }]),
-        AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n显示器报价正常'),
+        AnalysisResult(has_tier_opportunity=False, has_stock_risk=False),
+        AIMessage(content="请选择供应商编号。"),
+        # 新会话
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_sales",
+                    cart_items=[{"product_id": "p002", "product_name": "椅子", "quantity": 5}]),
+        AIMessage(content="", tool_calls=[{
+            "id": "call_new_1", "name": "simulate_purchase",
+            "args": {"department_id": "dept_sales", "items": [{"product_id": "p002", "quantity": 5}]},
+        }]),
+        AnalysisResult(has_tier_opportunity=False, has_stock_risk=False),
+        AIMessage(content="请选择供应商编号。"),
     ])
 
     with patch("app.agent.llm._get_llm", return_value=mock_llm):

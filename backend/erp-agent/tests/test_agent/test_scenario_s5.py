@@ -12,8 +12,9 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.state import AgentState
+from app.agent.schemas import AnalysisResult, Intent, ParseResult
 from app.agent.graph import build_graph
-from tests.fixtures import make_mock_tools, make_mock_llm
+from tests.fixtures import make_mock_tools, make_structured_mock_llm
 
 
 async def test_s5_multi_supplier():
@@ -30,17 +31,15 @@ async def test_s5_multi_supplier():
         ],
     })
     tools = make_mock_tools(simulate_response=simulate_resp)
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_it",
-            "cart_items": [{"product_id": "p005", "product_name": "键盘", "quantity": 5}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_it",
+                    cart_items=[{"product_id": "p005", "product_name": "键盘", "quantity": 5}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_001", "name": "simulate_purchase",
             "args": {"department_id": "dept_it", "items": [{"product_id": "p005", "quantity": 5}]},
         }]),
-        AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n多供应商报价，各有优势'),
+        AnalysisResult(has_tier_opportunity=False, has_stock_risk=False),
+        AIMessage(content="请选择供应商编号，或输入其他条件重新试算。"),
     ])
 
     with patch("app.agent.llm._get_llm", return_value=mock_llm):

@@ -1,6 +1,6 @@
 import json
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.types import Command, interrupt
 
 from app.agent.state import AgentState
@@ -17,79 +17,38 @@ def _get_llm():
 async def parse_input(state: AgentState) -> dict:
     """LLM 解析用户输入，提取意图、部门、商品等关键信息。
 
-    结构化输出：LLM 先声明 intent 类型，代码根据 intent 决定是否覆盖 State。
+    使用 structured output 直接返回类型化的 ParseResult，不再手动解析 JSON。
     模糊输入（confirm）→ 返回空 dict，沿用当前 State。
     """
     user_msg = state["messages"][-1].content if state.get("messages") else ""
 
     llm = _get_llm()
-    from app.agent.prompts import SYSTEM_PROMPT
+    from app.agent.schemas import Intent, ParseResult
 
-    system = SYSTEM_PROMPT.format(
-        po_status=state.get("po_status") or "新会话",
-        context="解析用户输入",
-    )
-
-    messages = [
-        SystemMessage(content=system),
+    structured_llm = llm.with_structured_output(ParseResult)
+    result: ParseResult = await structured_llm.ainvoke([
         SystemMessage(content=(
-            "请分析用户输入的意图。\n"
-            "在回答的最开头，先输出一行 JSON（不要包裹在 markdown 代码块中）：\n\n"
-            "如果是确认/继续/同意类输入（如\"好的\"、\"就按这个来\"、\"继续\"、\"确认\"等），输出：\n"
-            '{"intent": "confirm"}\n\n'
-            "如果是新的采购请求，输出：\n"
-            '{"intent": "new_request", "department_id": "部门ID", "cart_items": [{"product_id": "商品ID", "product_name": "商品名", "quantity": 数量}]}\n\n'
-            "如果是修改已有请求，输出：\n"
-            '{"intent": "modify", "changes": {"要修改的字段": "新值"}}\n\n'
-            "然后换行给出简要说明。"
+            "你是 ERP 意图解析器。分析用户输入，返回结构化的意图解析结果。\n"
+            "- confirm: 确认/继续/同意类输入（如\"好的\"、\"就按这个来\"、\"继续\"）\n"
+            "- new_request: 新的采购请求\n"
+            "- modify: 修改已有请求"
         )),
-    ]
+        HumanMessage(content=user_msg),
+    ])
 
-    response = await llm.ainvoke(messages)
-    content = response.content or ""
+    if result.intent == Intent.CONFIRM:
+        return {"user_intent": result.intent.value, "messages": []}
 
-    # 解析首行 JSON 提取 intent
-    first_line = content.strip().split("\n", 1)[0].strip()
-    intent = "new_request"
-    try:
-        flags = json.loads(first_line)
-        if isinstance(flags, dict):
-            intent = flags.get("intent", "new_request")
-    except (json.JSONDecodeError, AttributeError):
-        pass
-
-    # confirm → 不覆盖 State
-    if intent == "confirm":
-        return {"user_intent": content, "messages": [response]}
-
-    # new_request / modify → 提取字段
-    result = {
-        "user_intent": content,
-        "messages": [response],
-    }
-
-    try:
-        flags = json.loads(first_line)
-        if isinstance(flags, dict):
-            if intent == "modify" and flags.get("changes"):
-                changes = flags["changes"]
-                if changes.get("department_id"):
-                    result["department_id"] = changes["department_id"]
-                if changes.get("cart_items"):
-                    result["cart_items"] = changes["cart_items"]
-                if changes.get("selected_supplier_id"):
-                    result["selected_supplier_id"] = changes["selected_supplier_id"]
-            elif intent == "new_request":
-                if flags.get("department_id"):
-                    result["department_id"] = flags["department_id"]
-                if flags.get("cart_items"):
-                    result["cart_items"] = flags["cart_items"]
-                if flags.get("selected_supplier_id"):
-                    result["selected_supplier_id"] = flags["selected_supplier_id"]
-    except (json.JSONDecodeError, AttributeError):
-        pass
-
-    return result
+    update: dict = {"user_intent": result.intent.value, "messages": []}
+    if result.department_id:
+        update["department_id"] = result.department_id
+    if result.cart_items:
+        update["cart_items"] = result.cart_items
+    if result.selected_supplier_id:
+        update["selected_supplier_id"] = result.selected_supplier_id
+    if result.intent == Intent.MODIFY and result.changes:
+        update.update(result.changes)
+    return update
 
 
 async def analyze_simulate(state: AgentState) -> dict:
@@ -117,46 +76,23 @@ async def analyze_simulate(state: AgentState) -> dict:
         return {}
 
     llm = _get_llm()
-    from app.agent.prompts import SYSTEM_PROMPT
+    from app.agent.schemas import AnalysisResult
 
-    system = SYSTEM_PROMPT.format(
-        po_status=state.get("po_status") or "试算完成",
-        context=f"试算结果: {json.dumps(data, ensure_ascii=False)[:2000]}",
-    )
-
-    messages = [
-        SystemMessage(content=system),
+    structured_llm = llm.with_structured_output(AnalysisResult)
+    result: AnalysisResult = await structured_llm.ainvoke([
         SystemMessage(content=(
-            "请分析以上试算结果。\n"
-            "在回答的最开头，先输出一行 JSON（不要包裹在 markdown 代码块中）：\n"
-            '{"has_tier_opportunity": true/false, "has_stock_risk": true/false}\n'
-            "判断依据：\n"
-            "- has_tier_opportunity: 是否存在阶梯价格机会（如多买可降低单价）\n"
-            "- has_stock_risk: 是否存在库存不足风险\n"
-            "然后换行给出详细分析。"
+            "你是 ERP 采购分析师。分析试算结果，判断是否存在阶梯价机会和库存风险。\n"
+            f"试算结果: {json.dumps(data, ensure_ascii=False)[:2000]}"
         )),
-    ]
-
-    response = await llm.ainvoke(messages)
-
-    has_tier = False
-    has_stock_risk = False
-    content = response.content or ""
-    first_line = content.strip().split("\n", 1)[0].strip()
-    try:
-        flags = json.loads(first_line)
-        has_tier = bool(flags.get("has_tier_opportunity", False))
-        has_stock_risk = bool(flags.get("has_stock_risk", False))
-    except (json.JSONDecodeError, AttributeError):
-        pass
+        HumanMessage(content="请分析以上试算结果。"),
+    ])
 
     return {
         "analysis_result": {
-            "has_tier_opportunity": has_tier,
-            "has_stock_risk": has_stock_risk,
-            "summary": content,
+            "has_tier_opportunity": result.has_tier_opportunity,
+            "has_stock_risk": result.has_stock_risk,
         },
-        "messages": [response],
+        "messages": [],
     }
 
 

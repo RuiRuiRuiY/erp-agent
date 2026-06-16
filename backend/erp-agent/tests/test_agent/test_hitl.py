@@ -16,8 +16,9 @@ from langgraph.types import Command
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.state import AgentState
+from app.agent.schemas import Intent, ParseResult
 from app.agent.graph import build_graph
-from tests.fixtures import make_mock_tools, make_mock_llm
+from tests.fixtures import make_mock_tools, make_structured_mock_llm
 
 
 async def _mock_override_po(**kwargs) -> str:
@@ -58,12 +59,9 @@ def _make_budget_error_tools():
 async def test_hitl_interrupt_resume():
     """Task 5.1: 挂起 → resume 注入 override_token 的基础链路"""
     tools = _make_budget_error_tools()
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_rd",
-            "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_rd",
+                    cart_items=[{"product_id": "p003", "product_name": "椅子", "quantity": 10}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_001", "name": "draft_purchase_order",
             "args": {"department_id": "dept_rd", "supplier_id": "sup_c",
@@ -103,12 +101,9 @@ async def test_hitl_override_full_flow():
       - resume_cleanup 后临时字段清除，业务字段保留 (Task 5.3)
     """
     tools = _make_budget_error_tools()
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_rd",
-            "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_rd",
+                    cart_items=[{"product_id": "p003", "product_name": "椅子", "quantity": 10}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_001", "name": "draft_purchase_order",
             "args": {"department_id": "dept_rd", "supplier_id": "sup_c",
@@ -167,12 +162,9 @@ async def test_hitl_override_full_flow():
 async def test_hitl_override_missing_params():
     """缺少必要参数时 override_po_node 应报错而非崩溃"""
     tools = _make_budget_error_tools()
-    mock_llm = make_mock_llm([
-        AIMessage(content=json.dumps({
-            "intent": "new_request",
-            "department_id": "dept_rd",
-            "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
-        })),
+    mock_llm = make_structured_mock_llm([
+        ParseResult(intent=Intent.NEW_REQUEST, department_id="dept_rd",
+                    cart_items=[{"product_id": "p003", "product_name": "椅子", "quantity": 10}]),
         AIMessage(content="", tool_calls=[{
             "id": "call_001", "name": "draft_purchase_order",
             "args": {"department_id": "dept_rd", "supplier_id": "sup_c",
