@@ -78,3 +78,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 # next-env.d.ts
+
+# integration
+.mimocode
+.opencode
+.claude
+.codegraph
+.mcp.json
+opencode.jsonc
+chainlit.md

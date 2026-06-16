@@ -1,4 +1,3 @@
-
 """
 Task 5.1: HITL interrupt/resume 验证
 Task 5.2: override_purchase_order 工具调用与全流程验证
@@ -12,13 +11,13 @@ Task 5.3: resume 后状态恢复 — 清理临时字段，保留业务数据
 import json
 from unittest.mock import patch
 
+import pytest
 from langgraph.types import Command
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.state import AgentState
 from app.agent.graph import build_graph
-
-graph = build_graph()
+from tests.fixtures import make_mock_tools, make_mock_llm
 
 
 async def _mock_override_po(**kwargs) -> str:
@@ -47,31 +46,51 @@ async def _mock_transit_po(**kwargs) -> str:
     })
 
 
-def test_hitl_interrupt_resume():
+def _make_budget_error_tools():
+    draft_resp = json.dumps({
+        "_error": True, "error_code": "BUDGET_INSUFFICIENT", "action": "request_override",
+        "context": {"required": 6000.0, "remaining": 5000.0, "deficit": 1000.0},
+    })
+    return make_mock_tools(draft_response=draft_resp)
+
+
+@pytest.mark.asyncio
+async def test_hitl_interrupt_resume():
     """Task 5.1: 挂起 → resume 注入 override_token 的基础链路"""
-    initial = AgentState(
-        messages=[ToolMessage(
-            content=json.dumps({
-                "_error": True,
-                "error_code": "BUDGET_INSUFFICIENT",
-                "context": {"required": 6000.0, "remaining": 5000.0, "deficit": 1000.0},
-            }),
-            tool_call_id="t1", name="draft_purchase_order",
-        )],
-        pending_approval_type="budget",
-    )
-    config = {"configurable": {"thread_id": "test-hitl-1"}}
+    tools = _make_budget_error_tools()
+    mock_llm = make_mock_llm([
+        AIMessage(content=json.dumps({
+            "intent": "new_request",
+            "department_id": "dept_rd",
+            "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
+        })),
+        AIMessage(content="", tool_calls=[{
+            "id": "call_001", "name": "draft_purchase_order",
+            "args": {"department_id": "dept_rd", "supplier_id": "sup_c",
+                     "items": [{"product_id": "p003", "quantity": 10}]},
+        }]),
+    ])
 
-    for event in graph.stream(initial, config, stream_mode="updates"):
-        pass
+    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+        graph = await build_graph(tools=tools)
+        initial = AgentState(
+            messages=[HumanMessage(content="为研发部买10把椅子")],
+            department_id="dept_rd",
+            selected_supplier_id="sup_c",
+            cart_items=[{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
+        )
+        config = {"configurable": {"thread_id": "test-hitl-1"}}
 
-    state = graph.get_state(config)
-    assert state.values.get("pending_approval_type") == "budget", "应处于 budget 挂起状态"
+        async for event in graph.astream(initial, config, stream_mode="updates"):
+            pass
 
-    for event in graph.stream(Command(resume={"override_token": "override-secret-2025"}), config, stream_mode="updates"):
-        pass
+        state = await graph.aget_state(config)
+        assert state.values.get("pending_approval_type") == "budget", "应处于 budget 挂起状态"
 
-    final = graph.get_state(config)
+        async for event in graph.astream(Command(resume={"override_token": "override-secret-2025"}), config, stream_mode="updates"):
+            pass
+
+    final = await graph.aget_state(config)
     assert final.values.get("override_token") == "override-secret-2025", "override_token 应已注入"
     assert final.values.get("pending_approval_type") is None, "pending_approval_type 应已清除"
 
@@ -83,45 +102,50 @@ async def test_hitl_override_full_flow():
       - 传入 override_token 成功建单 (Task 5.2)
       - resume_cleanup 后临时字段清除，业务字段保留 (Task 5.3)
     """
-    initial = AgentState(
-        pending_approval_type="budget",
-        override_token=None,
-        department_id="dept_rd",
-        selected_supplier_id="sup_c",
-        cart_items=[
-            {"product_id": "p003", "product_name": "人体工学椅", "quantity": 10},
-        ],
-        tier_suggestion="旧的阶梯建议",
-        messages=[ToolMessage(
-            content=json.dumps({
-                "_error": True,
-                "error_code": "BUDGET_INSUFFICIENT",
-                "context": {"required": 6000.0, "remaining": 5000.0, "deficit": 1000.0},
-            }),
-            tool_call_id="t1", name="draft_purchase_order",
-        )],
-    )
-    config = {"configurable": {"thread_id": "test-hitl-override"}}
+    tools = _make_budget_error_tools()
+    mock_llm = make_mock_llm([
+        AIMessage(content=json.dumps({
+            "intent": "new_request",
+            "department_id": "dept_rd",
+            "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
+        })),
+        AIMessage(content="", tool_calls=[{
+            "id": "call_001", "name": "draft_purchase_order",
+            "args": {"department_id": "dept_rd", "supplier_id": "sup_c",
+                     "items": [{"product_id": "p003", "quantity": 10}]},
+        }]),
+    ])
 
-    # ── Step 1: 触发中断 ──────────────────────────────────────────
-    async for _ in graph.astream(initial, config, stream_mode="updates"):
-        pass
+    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+        graph = await build_graph(tools=tools)
+        initial = AgentState(
+            messages=[HumanMessage(content="为研发部买10把椅子")],
+            department_id="dept_rd",
+            selected_supplier_id="sup_c",
+            cart_items=[{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
+            tier_suggestion="旧的阶梯建议",
+        )
+        config = {"configurable": {"thread_id": "test-hitl-override"}}
 
-    state = await graph.aget_state(config)
-    assert state.values.get("pending_approval_type") == "budget", "应处于挂起状态"
-    assert state.values.get("po_draft_id") is None, "挂起时不应有 PO"
-
-    # ── Step 2: resume → 走完整 override 链路 + cleanup ───────────
-    with (
-        patch("app.agent.nodes.override_purchase_order", _mock_override_po),
-        patch("app.agent.nodes.transit_po_status", _mock_transit_po),
-    ):
-        async for _ in graph.astream(
-            Command(resume={"override_token": "override-secret-2025"}),
-            config,
-            stream_mode="updates",
-        ):
+        # ── Step 1: 触发中断 ──────────────────────────────────────────
+        async for _ in graph.astream(initial, config, stream_mode="updates"):
             pass
+
+        state = await graph.aget_state(config)
+        assert state.values.get("pending_approval_type") == "budget", "应处于挂起状态"
+        assert state.values.get("po_draft_id") is None, "挂起时不应有 PO"
+
+        # ── Step 2: resume → 走完整 override 链路 + cleanup ───────────
+        with (
+            patch("app.agent.nodes.override_purchase_order", _mock_override_po),
+            patch("app.agent.nodes.transit_po_status", _mock_transit_po),
+        ):
+            async for _ in graph.astream(
+                Command(resume={"override_token": "override-secret-2025"}),
+                config,
+                stream_mode="updates",
+            ):
+                pass
 
     final = await graph.aget_state(config)
 
@@ -142,30 +166,41 @@ async def test_hitl_override_full_flow():
 
 async def test_hitl_override_missing_params():
     """缺少必要参数时 override_po_node 应报错而非崩溃"""
-    config = {"configurable": {"thread_id": "test-hitl-missing-params"}}
+    tools = _make_budget_error_tools()
+    mock_llm = make_mock_llm([
+        AIMessage(content=json.dumps({
+            "intent": "new_request",
+            "department_id": "dept_rd",
+            "cart_items": [{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
+        })),
+        AIMessage(content="", tool_calls=[{
+            "id": "call_001", "name": "draft_purchase_order",
+            "args": {"department_id": "dept_rd", "supplier_id": "sup_c",
+                     "items": [{"product_id": "p003", "quantity": 10}]},
+        }]),
+    ])
 
-    # 没有 department_id / selected_supplier_id / cart_items
-    initial = AgentState(
-        messages=[ToolMessage(
-            content=json.dumps({
-                "_error": True,
-                "error_code": "BUDGET_INSUFFICIENT",
-                "context": {"required": 6000.0, "remaining": 5000.0, "deficit": 1000.0},
-            }),
-            tool_call_id="t1", name="draft_purchase_order",
-        )],
-        pending_approval_type="budget",
-    )
+    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+        graph = await build_graph(tools=tools)
+        config = {"configurable": {"thread_id": "test-hitl-missing-params"}}
 
-    async for _ in graph.astream(initial, config, stream_mode="updates"):
-        pass
+        # 没有 department_id / selected_supplier_id / cart_items
+        initial = AgentState(
+            messages=[HumanMessage(content="为研发部买10把椅子")],
+            department_id="dept_rd",
+            selected_supplier_id="sup_c",
+            cart_items=[{"product_id": "p003", "product_name": "椅子", "quantity": 10}],
+        )
 
-    async for _ in graph.astream(
-        Command(resume={"override_token": "override-secret-2025"}),
-        config,
-        stream_mode="updates",
-    ):
-        pass
+        async for _ in graph.astream(initial, config, stream_mode="updates"):
+            pass
+
+        async for _ in graph.astream(
+            Command(resume={"override_token": "override-secret-2025"}),
+            config,
+            stream_mode="updates",
+        ):
+            pass
 
     final = await graph.aget_state(config)
     assert final.values.get("override_token") == "override-secret-2025", "token 仍应注入"

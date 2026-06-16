@@ -7,18 +7,17 @@ S5 集成测试：综合寻源
 验收: 多供应商报价存在，tier_suggest 不产生建议
 """
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.state import AgentState
 from app.agent.graph import build_graph
-
-graph = build_graph()
+from tests.fixtures import make_mock_tools, make_mock_llm
 
 
 async def test_s5_multi_supplier():
-    simulate_raw = json.dumps({
+    simulate_resp = json.dumps({
         "all_quotes": [
             {"supplier_id": "sup_a", "supplier_name": "Shenzhen Hongda",
              "default_lead_time_days": 15, "rating": 4.5, "total_amount": 2250.0,
@@ -30,14 +29,29 @@ async def test_s5_multi_supplier():
                                "unit_price": 500.0, "subtotal": 2500.0}]},
         ],
     })
+    tools = make_mock_tools(simulate_response=simulate_resp)
+    mock_llm = make_mock_llm([
+        AIMessage(content=json.dumps({
+            "intent": "new_request",
+            "department_id": "dept_it",
+            "cart_items": [{"product_id": "p005", "product_name": "键盘", "quantity": 5}],
+        })),
+        AIMessage(content="", tool_calls=[{
+            "id": "call_001", "name": "simulate_purchase",
+            "args": {"department_id": "dept_it", "items": [{"product_id": "p005", "quantity": 5}]},
+        }]),
+        AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n多供应商报价，各有优势'),
+    ])
 
-    initial = AgentState(
-        messages=[ToolMessage(content=simulate_raw, tool_call_id="t1", name="simulate_purchase")],
-        simulate_result={"raw": simulate_raw},
-    )
-    config = {"configurable": {"thread_id": "s5-int"}}
+    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+        graph = await build_graph(tools=tools)
+        initial = AgentState(
+            messages=[HumanMessage(content="买5个键盘")],
+            department_id="dept_it",
+            cart_items=[{"product_id": "p005", "product_name": "键盘", "quantity": 5}],
+        )
+        config = {"configurable": {"thread_id": "s5-int"}}
 
-    with patch("app.agent.nodes.erp_get", AsyncMock(return_value=[])):
         async for _ in graph.astream(initial, config, stream_mode="updates"):
             pass
 

@@ -23,8 +23,6 @@ from langchain_core.messages import ToolMessage
 from app.agent.state import AgentState
 from app.agent.graph import build_graph
 
-graph = build_graph()
-
 PASS = "\033[92m[PASS]\033[0m"
 FAIL = "\033[91m[FAIL]\033[0m"
 BOLD = "\033[1m"
@@ -74,6 +72,8 @@ async def main():
     global passed, failed
     thread_id = "sim-s3-hitl"
     config = {"configurable": {"thread_id": thread_id}}
+
+    graph = await build_graph()
 
     print()
     print("=" * 72)

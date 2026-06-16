@@ -7,14 +7,13 @@ simulate_purchase 返回正常报价 → entry → tier_suggest（无阶梯 → 
 验收: 路由正确，无阶梯时不产生 tier_suggestion
 """
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.state import AgentState
 from app.agent.graph import build_graph
-
-graph = build_graph()
+from tests.fixtures import make_mock_tools, make_mock_llm
 
 
 async def test_s1_regular_purchase():
@@ -26,13 +25,25 @@ async def test_s1_regular_purchase():
                                "unit_price": 1000.0, "subtotal": 5000.0}]},
         ],
     })
-    initial = AgentState(
-        messages=[ToolMessage(content=simulate_raw, tool_call_id="t1", name="simulate_purchase")],
-        simulate_result={"raw": simulate_raw},
-    )
-    config = {"configurable": {"thread_id": "s1-int"}}
+    tools = make_mock_tools(simulate_response=simulate_raw)
+    mock_llm = make_mock_llm([
+        AIMessage(content=json.dumps({
+            "intent": "new_request",
+            "department_id": "dept_it",
+            "cart_items": [{"product_id": "p001", "product_name": "显示器", "quantity": 5}],
+        })),
+        AIMessage(content="", tool_calls=[{
+            "id": "call_001", "name": "simulate_purchase",
+            "args": {"department_id": "dept_it", "items": [{"product_id": "p001", "quantity": 5}]},
+        }]),
+        AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n无阶梯价机会'),
+    ])
 
-    with patch("app.agent.nodes.erp_get", AsyncMock(return_value=[])):
+    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+        graph = await build_graph(tools=tools)
+        initial = AgentState(messages=[HumanMessage(content="买5台显示器给IT部")])
+        config = {"configurable": {"thread_id": "s1-int"}}
+
         async for _ in graph.astream(initial, config, stream_mode="updates"):
             pass
 

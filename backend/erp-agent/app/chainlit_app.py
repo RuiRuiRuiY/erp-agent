@@ -37,7 +37,7 @@ async def _get_graph():
             tools = []
         cl.user_session.set("mcp_tools", tools)
 
-    _graph = build_graph(tools=tools or [])
+    _graph = await build_graph(tools=tools or [])
     return _graph
 
 

@@ -27,15 +27,15 @@ from app.mcp.server import (
     simulate_purchase,
 )
 
-# ── UUIDs ──────────────────────────────────────────────────────────────────
-SUP_A = "c39c69ee-d865-47c4-a067-62038722811a"
-SUP_C = "79a08cf4-6cfd-4c9e-8cf2-b7911a06b781"
-DEPT_RD = "716ab0b4-c98e-473f-81fc-1a8063cc179d"
-DEPT_IT = "1061736d-f4ea-43c4-ba0e-60d1224bfc78"
-PROD_MONITOR = "07c5fb7a-2c99-40cb-be86-bd70a2a35fbd"
-PROD_CHAIR = "fe87f02a-1d9f-4960-b6b0-9adf30e9ff84"
-PROD_MOUSE = "fbf13637-2305-48d1-a1d7-311d8eb5bcf3"
-PROD_KEYBOARD = "e79c3b47-a9b0-4334-8d0b-cd7d50eff850"
+# ── UUIDs（与 mock-erp seed 数据一致）───────────────────────────────────────
+SUP_A = "103b39ae-8e69-4f81-b5d6-f7047dca70f7"
+SUP_C = "6a284463-d695-4cd0-bf6a-a386a881ede8"
+DEPT_RD = "66ba46e6-fe84-4f96-8428-40b7b4dbae53"
+DEPT_IT = "c8b96937-388a-490a-beb0-39f379c5af25"
+PROD_MONITOR = "2cff2b4d-f224-4a22-9ef9-27c8ab149fcf"
+PROD_CHAIR = "b28f302f-16b6-473e-b767-4732c585a177"
+PROD_MOUSE = "b765477d-fd57-4434-9b4b-3ee4115d01df"
+PROD_KEYBOARD = "6724b68f-f4f0-4885-93ae-f86cd32610c7"
 
 
 def make_state(tool_content: str, **extra) -> AgentState:

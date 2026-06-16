@@ -404,15 +404,15 @@ gantt
   - 产出: 同上目录
   - 验收: finance 角色看不到"强行审批"按钮
 
-- [ ] **Task 1.4**: "强行审批"反向唤醒功能 `[P0 · 40min]`
+~~- [ ] **Task 1.4**: "强行审批"反向唤醒功能 `[P0 · 40min]`~~
   - 产出: 同文件
   - 验收: 点击 → 调用 LangGraph API resume → 注入 override_token
 
-- [ ] **Task 1.5**: Langfuse Trace ID 超链接 `[P1 · 20min]`
+~~- [ ] **Task 1.5**: Langfuse Trace ID 超链接 `[P1 · 20min]`~~
   - 产出: 同文件
   - 验收: 点击跳转 Langfuse 详情页
 
-- [ ] **复盘: Day 1**
+~~- [ ] **复盘: Day 1**~~
   - 验收: 管控台可查看数据、RBAC 生效、强行审批可用
 
 ---

@@ -4,83 +4,15 @@ Sprint 2 Task 2.2: 5 场景全链路端到端测试
 生产模式图流程：mock LLM + mock tools → 完整图执行 → 验证最终状态
 """
 import json
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.tools import tool
 from langgraph.types import Command
 
 from app.agent.graph import build_graph
 from app.agent.state import AgentState
-
-
-# ── 工具工厂 ──────────────────────────────────────────────────────────────
-
-
-def _make_tools(*, simulate_response=None, draft_response=None, inventory_response=None):
-    """创建 mock 工具集，simulate/draft/inventory 可按场景覆盖。"""
-
-    @tool(description="搜索商品列表")
-    async def search_product(q: str = "", product_id: str = "") -> str:
-        return json.dumps([{"id": "p001", "name": "显示器", "sku": "MON-001"}])
-
-    @tool(description="查询部门预算")
-    async def check_budget(department_id: str = "") -> str:
-        return json.dumps({
-            "department_id": department_id,
-            "total_budget": 100000.0, "used_budget": 50000.0, "available": 50000.0,
-        })
-
-    @tool(description="查询库存")
-    async def check_inventory(product_id: str = "") -> str:
-        if inventory_response:
-            return inventory_response
-        return json.dumps({"product_id": product_id, "total_qty": 20, "available_qty": 20})
-
-    @tool(description="模拟采购试算")
-    async def simulate_purchase(department_id: str = "", items: Any = "[]") -> str:
-        if simulate_response:
-            return simulate_response
-        item_list = json.loads(items) if isinstance(items, str) else items
-        total = sum(1000.0 * i.get("quantity", 1) for i in item_list)
-        return json.dumps({
-            "department_remaining_budget": 50000.0,
-            "all_quotes": [{
-                "supplier_id": "sup_a", "supplier_name": "深圳宏达电子",
-                "default_lead_time_days": 15, "rating": 4.5, "total_amount": total,
-                "line_details": [{"product_id": i.get("product_id", "p001"), "product_name": "显示器",
-                                  "quantity": i.get("quantity", 1), "unit_price": 1000.0,
-                                  "subtotal": 1000.0 * i.get("quantity", 1)} for i in item_list],
-            }],
-        })
-
-    @tool(description="创建采购单")
-    async def draft_purchase_order(
-        department_id: str = "", supplier_id: str = "",
-        items: Any = "[]", agent_reasoning: str = "",
-    ) -> str:
-        if draft_response:
-            return draft_response
-        return json.dumps({"id": "po-001", "po_number": "PO-20260607-001", "status": "DRAFT", "total_amount": 5000.0})
-
-    return [search_product, check_budget, check_inventory, simulate_purchase, draft_purchase_order]
-
-
-def _mock_llm_factory(responses):
-    """创建 mock LLM，responses 是按调用顺序返回的 AIMessage 列表。"""
-    call_idx = [0]
-
-    async def mock_ainvoke(messages, **kwargs):
-        idx = min(call_idx[0], len(responses) - 1)
-        call_idx[0] += 1
-        return responses[idx]
-
-    mock_llm = MagicMock()
-    mock_llm.ainvoke = mock_ainvoke
-    mock_llm.bind_tools = MagicMock(return_value=mock_llm)
-    return mock_llm
+from tests.fixtures import make_mock_tools, make_mock_llm
 
 
 def _get_final_msgs(final):
@@ -95,8 +27,8 @@ def _get_final_msgs(final):
 @pytest.mark.asyncio
 async def test_s1_regular_purchase_e2e():
     """S1: 用户消息 → parse_input → call_model(simulate) → analyze_simulate → present_options → END"""
-    tools = _make_tools()
-    mock_llm = _mock_llm_factory([
+    tools = make_mock_tools()
+    mock_llm = make_mock_llm([
         AIMessage(content=json.dumps({
             "intent": "new_request",
             "department_id": "dept_it",
@@ -110,7 +42,7 @@ async def test_s1_regular_purchase_e2e():
     ])
 
     with patch("app.agent.graph._get_llm", return_value=mock_llm):
-        graph = build_graph(tools=tools)
+        graph = await build_graph(tools=tools)
         initial = AgentState(messages=[HumanMessage(content="买5台显示器给IT部")])
         config = {"configurable": {"thread_id": "e2e-s1"}}
 
@@ -134,8 +66,8 @@ async def test_s2_insufficient_stock_e2e():
         "_error": True, "error_code": "INSUFFICIENT_STOCK", "action": "self_heal",
         "context": {"product_id": "p003", "requested": 10, "available": 5},
     })
-    tools = _make_tools(inventory_response=inventory_resp)
-    mock_llm = _mock_llm_factory([
+    tools = make_mock_tools(inventory_response=inventory_resp)
+    mock_llm = make_mock_llm([
         AIMessage(content=json.dumps({
             "intent": "new_request",
             "department_id": "dept_it",
@@ -148,7 +80,7 @@ async def test_s2_insufficient_stock_e2e():
     ])
 
     with patch("app.agent.graph._get_llm", return_value=mock_llm):
-        graph = build_graph(tools=tools)
+        graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="买10把椅子")],
             department_id="dept_it",
@@ -176,8 +108,8 @@ async def test_s3_hitl_approval_e2e():
         "_error": True, "error_code": "BUDGET_INSUFFICIENT", "action": "request_override",
         "context": {"required": 6000.0, "remaining": 5000.0, "deficit": 1000.0},
     })
-    tools = _make_tools(draft_response=draft_resp)
-    mock_llm = _mock_llm_factory([
+    tools = make_mock_tools(draft_response=draft_resp)
+    mock_llm = make_mock_llm([
         AIMessage(content=json.dumps({
             "intent": "new_request",
             "department_id": "dept_rd",
@@ -191,7 +123,7 @@ async def test_s3_hitl_approval_e2e():
     ])
 
     with patch("app.agent.graph._get_llm", return_value=mock_llm):
-        graph = build_graph(tools=tools)
+        graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="为研发部买10把椅子")],
             department_id="dept_rd",
@@ -247,8 +179,8 @@ async def test_s4_tiered_pricing_e2e():
                               "quantity": 80, "unit_price": 100.0, "subtotal": 8000.0}],
         }],
     })
-    tools = _make_tools(simulate_response=simulate_resp)
-    mock_llm = _mock_llm_factory([
+    tools = make_mock_tools(simulate_response=simulate_resp)
+    mock_llm = make_mock_llm([
         AIMessage(content=json.dumps({
             "intent": "new_request",
             "department_id": "dept_it",
@@ -271,7 +203,7 @@ async def test_s4_tiered_pricing_e2e():
 
     with patch("app.agent.graph._get_llm", return_value=mock_llm), \
          patch("app.agent.nodes.erp_get", side_effect=mock_erp_get):
-        graph = build_graph(tools=tools)
+        graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="买80个鼠标给IT部")],
             department_id="dept_it",
@@ -305,8 +237,8 @@ async def test_s5_multi_supplier_e2e():
              "line_details": [{"product_id": "p005", "quantity": 5, "unit_price": 500.0, "subtotal": 2500.0}]},
         ],
     })
-    tools = _make_tools(simulate_response=simulate_resp)
-    mock_llm = _mock_llm_factory([
+    tools = make_mock_tools(simulate_response=simulate_resp)
+    mock_llm = make_mock_llm([
         AIMessage(content=json.dumps({
             "intent": "new_request",
             "department_id": "dept_it",
@@ -320,7 +252,7 @@ async def test_s5_multi_supplier_e2e():
     ])
 
     with patch("app.agent.graph._get_llm", return_value=mock_llm):
-        graph = build_graph(tools=tools)
+        graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="买5个键盘")],
             department_id="dept_it",
@@ -342,16 +274,16 @@ async def test_s5_multi_supplier_e2e():
 @pytest.mark.asyncio
 async def test_s6_fuzzy_input_preserves_state():
     """S6: 模糊输入（'就按这个来'）→ intent=confirm → 沿用当前 State"""
-    tools = _make_tools()
+    tools = make_mock_tools()
     # parse_input: intent=confirm → 不提取字段
     # call_model: 正常响应
-    mock_llm = _mock_llm_factory([
+    mock_llm = make_mock_llm([
         AIMessage(content='{"intent": "confirm"}\n用户确认继续当前采购流程'),
         AIMessage(content="继续当前采购流程"),
     ])
 
     with patch("app.agent.graph._get_llm", return_value=mock_llm):
-        graph = build_graph(tools=tools)
+        graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="就按这个来")],
             department_id="dept_it",
@@ -374,9 +306,9 @@ async def test_s6_fuzzy_input_preserves_state():
 @pytest.mark.asyncio
 async def test_s7_reset_creates_new_thread_state():
     """S7: /reset 后使用新 thread_id → 状态清空，不受旧会话影响"""
-    tools = _make_tools()
+    tools = make_mock_tools()
 
-    mock_llm = _mock_llm_factory([
+    mock_llm = make_mock_llm([
         AIMessage(content=json.dumps({
             "intent": "new_request",
             "department_id": "dept_sales",
@@ -390,7 +322,7 @@ async def test_s7_reset_creates_new_thread_state():
     ])
 
     with patch("app.agent.graph._get_llm", return_value=mock_llm):
-        graph = build_graph(tools=tools)
+        graph = await build_graph(tools=tools)
 
         # 模拟旧会话
         old_config = {"configurable": {"thread_id": "e2e-s7-old"}}

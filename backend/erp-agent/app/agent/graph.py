@@ -2,9 +2,7 @@
 
 混合架构：ToolNode 执行 MCP 工具 + 显式业务节点处理逻辑。
 
-提供两种模式：
-- build_graph(tools=[]) — 生产模式：LLM + ToolNode + 业务节点 + 完整路由
-- build_graph(tools=None) — 测试模式：跳过 LLM，直接按 state 路由（用于单元测试）
+build_graph(tools) — 构建生产模式图：LLM + ToolNode + 业务节点 + 完整路由。
 """
 
 from __future__ import annotations
@@ -38,12 +36,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# 全局缓存：chainlit run 为单进程 asyncio 模型，所有会话共享同一实例。
+# 如果未来改为 Gunicorn + 多 Worker 部署，每个 Worker 进程会有独立副本，
+# 这是正常行为（多连接 = 更高并发）。
 _checkpointer: MemorySaver | None = None
 _llm_instance: Any = None
 
 
-def get_checkpointer() -> MemorySaver:
-    """创建持久化 checkpointer（PostgreSQL），无配置或连接失败时降级为 MemorySaver。"""
+async def aget_checkpointer() -> MemorySaver:
+    """获取 checkpointer（异步，生产模式使用）。有 DATABASE_URL 时创建 AsyncPostgresSaver。"""
     global _checkpointer
     if _checkpointer is not None:
         return _checkpointer
@@ -51,23 +52,18 @@ def get_checkpointer() -> MemorySaver:
         _checkpointer = MemorySaver()
         return _checkpointer
     try:
-        from langgraph.checkpoint.base import BaseCheckpointSaver
-        from langgraph.checkpoint.postgres import PostgresSaver
-        from psycopg import Connection
+        from psycopg import AsyncConnection
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-        conn = Connection.connect(
+        conn = await AsyncConnection.connect(
             settings.DATABASE_URL,
             autocommit=True,
             prepare_threshold=0,
             connect_timeout=5,
         )
-        cp = PostgresSaver(conn)
-        cp.setup()
-        if type(cp).aget_tuple is BaseCheckpointSaver.aget_tuple:
-            conn.close()
-            _checkpointer = MemorySaver()
-        else:
-            _checkpointer = cp
+        cp = AsyncPostgresSaver(conn)
+        await cp.setup()
+        _checkpointer = cp
     except Exception as e:
         sanitized = settings.DATABASE_URL.split("@")[-1] if "@" in settings.DATABASE_URL else settings.DATABASE_URL
         logger.warning("PostgreSQL 不可达 (%s: %s), 降级为 MemorySaver", sanitized, e)
@@ -91,139 +87,109 @@ def _get_llm():
     return _llm_instance
 
 
-# ── 测试模式路由 ────────────────────────────────────────────────────────
-
-
-def _test_route(state: AgentState) -> str:
-    """测试模式路由：优先按 state 字段路由，回退到 route_after_tools。"""
-    if state.get("error_context"):
-        return "stock_error"
-    if state.get("simulate_result"):
-        return "tier_suggest"
-    if state.get("pending_approval_type") == "budget":
-        return "budget_check"
-    return route_after_tools(state)
-
-
 # ── 图构建 ──────────────────────────────────────────────────────────────
 
 
-def build_graph(tools: list | None = None, checkpointer: Any = None) -> Any:
-    """构建并编译 LangGraph。
+async def build_graph(tools: list, checkpointer: Any = None) -> Any:
+    """构建并编译 LangGraph（生产模式）。
 
     Args:
-        tools: MCP 工具列表。None = 测试模式（无 LLM/ToolNode），[] = 生产模式但无工具。
-        checkpointer: 自定义 checkpointer。None = 使用 get_checkpointer()。
+        tools: MCP 工具列表。
+        checkpointer: 自定义 checkpointer。None = 自动获取。
     """
     if checkpointer is None:
-        checkpointer = get_checkpointer()
+        checkpointer = await aget_checkpointer()
+
+    from langchain_core.messages import SystemMessage
+    from app.agent.prompts import SYSTEM_PROMPT
 
     workflow = StateGraph(AgentState)
 
-    if tools is not None:
-        # ── 生产模式：LLM + ToolNode + 业务节点 ──
-        from langchain_core.messages import SystemMessage
-        from app.agent.prompts import SYSTEM_PROMPT
+    llm = _get_llm()
+    llm_with_tools = llm.bind_tools(tools)
+    tools_desc = "\n".join(f"- {t.name}: {t.description}" for t in tools if t.description)
 
-        llm = _get_llm()
-        llm_with_tools = llm.bind_tools(tools)
-        tools_desc = "\n".join(f"- {t.name}: {t.description}" for t in tools if t.description)
+    async def _call_model(state: AgentState) -> dict:
+        context_parts = []
+        if state.get("department_id"):
+            context_parts.append(f"部门: {state['department_id']}")
+        if state.get("cart_items"):
+            names = [i.get("product_name", "") for i in state["cart_items"]]
+            context_parts.append(f"商品: {', '.join(names)}")
+        if state.get("selected_supplier_id"):
+            context_parts.append(f"已选供应商: {state['selected_supplier_id']}")
 
-        async def _call_model(state: AgentState) -> dict:
-            context_parts = []
-            if state.get("department_id"):
-                context_parts.append(f"部门: {state['department_id']}")
-            if state.get("cart_items"):
-                names = [i.get("product_name", "") for i in state["cart_items"]]
-                context_parts.append(f"商品: {', '.join(names)}")
-            if state.get("selected_supplier_id"):
-                context_parts.append(f"已选供应商: {state['selected_supplier_id']}")
-
-            system = SYSTEM_PROMPT.format(
-                tools=tools_desc,
-                po_status=state.get("po_status") or "新会话",
-                context="; ".join(context_parts) or "新会话",
-            )
-            messages = [SystemMessage(content=system), *state["messages"]]
-            response = await llm_with_tools.ainvoke(messages)
-            return {"messages": [response]}
-
-        tool_node = ToolNode(tools)
-
-        # 入口：parse_input → call_model → ToolNode
-        workflow.add_node("parse_input", parse_input)
-        workflow.add_node("call_model", _call_model)
-        workflow.add_node("tools", tool_node)
-
-        workflow.add_edge(START, "parse_input")
-        workflow.add_edge("parse_input", "call_model")
-        workflow.add_conditional_edges(
-            "call_model", tools_condition, {"tools": "tools", "__end__": "__end__"}
+        system = SYSTEM_PROMPT.format(
+            tools=tools_desc,
+            po_status=state.get("po_status") or "新会话",
+            context="; ".join(context_parts) or "新会话",
         )
-        workflow.add_conditional_edges(
-            "tools",
-            route_after_tools,
-            {
-                "call_model": "call_model",
-                "analyze_simulate": "analyze_simulate",
-                "stock_error": "stock_error",
-                "budget_check": "budget_check",
-            },
-        )
+        messages = [SystemMessage(content=system), *state["messages"]]
+        response = await llm_with_tools.ainvoke(messages)
+        return {"messages": [response]}
 
-        # 分析节点
-        workflow.add_node("analyze_simulate", analyze_simulate)
-        workflow.add_conditional_edges(
-            "analyze_simulate",
-            route_after_analysis,
-            {
-                "tier_suggest": "tier_suggest",
-                "show_alternatives": "show_alternatives",
-                "present_options": "present_options",
-                "call_model": "call_model",
-            },
-        )
+    tool_node = ToolNode(tools)
 
-        # 展示 & 用户选择节点
-        workflow.add_node("present_options", present_options)
-        workflow.add_node("show_alternatives", show_alternatives)
-        workflow.add_node("user_resolve", user_resolve)
-        workflow.add_node("confirm_and_submit", confirm_and_submit)
+    # 入口：parse_input → call_model → ToolNode
+    workflow.add_node("parse_input", parse_input)
+    workflow.add_node("call_model", _call_model)
+    workflow.add_node("tools", tool_node)
 
-        workflow.add_conditional_edges(
-            "present_options",
-            route_after_user_choice,
-            {
-                "confirm_and_submit": "confirm_and_submit",
-                "call_model": "call_model",
-            },
-        )
-        workflow.add_conditional_edges(
-            "show_alternatives",
-            route_after_user_choice,
-            {
-                "confirm_and_submit": "confirm_and_submit",
-                "call_model": "call_model",
-            },
-        )
-        workflow.add_edge("user_resolve", "call_model")
-        workflow.add_edge("confirm_and_submit", END)
+    workflow.add_edge(START, "parse_input")
+    workflow.add_edge("parse_input", "call_model")
+    workflow.add_conditional_edges(
+        "call_model", tools_condition, {"tools": "tools", "__end__": "__end__"}
+    )
+    workflow.add_conditional_edges(
+        "tools",
+        route_after_tools,
+        {
+            "call_model": "call_model",
+            "analyze_simulate": "analyze_simulate",
+            "stock_error": "stock_error",
+            "budget_check": "budget_check",
+        },
+    )
 
-    else:
-        # ── 测试模式：按 state 直接路由，跳过 LLM ──
-        workflow.add_node("entry", lambda s: {})
-        workflow.add_edge(START, "entry")
-        workflow.add_conditional_edges(
-            "entry",
-            _test_route,
-            {
-                "stock_error": "stock_error",
-                "tier_suggest": "tier_suggest",
-                "budget_check": "budget_check",
-            },
-        )
+    # 分析节点
+    workflow.add_node("analyze_simulate", analyze_simulate)
+    workflow.add_conditional_edges(
+        "analyze_simulate",
+        route_after_analysis,
+        {
+            "tier_suggest": "tier_suggest",
+            "show_alternatives": "show_alternatives",
+            "present_options": "present_options",
+            "call_model": "call_model",
+        },
+    )
 
-    # ── 共享节点（两种模式一致） ──
+    # 展示 & 用户选择节点
+    workflow.add_node("present_options", present_options)
+    workflow.add_node("show_alternatives", show_alternatives)
+    workflow.add_node("user_resolve", user_resolve)
+    workflow.add_node("confirm_and_submit", confirm_and_submit)
+
+    workflow.add_conditional_edges(
+        "present_options",
+        route_after_user_choice,
+        {
+            "confirm_and_submit": "confirm_and_submit",
+            "call_model": "call_model",
+        },
+    )
+    workflow.add_conditional_edges(
+        "show_alternatives",
+        route_after_user_choice,
+        {
+            "confirm_and_submit": "confirm_and_submit",
+            "call_model": "call_model",
+        },
+    )
+    workflow.add_edge("user_resolve", "call_model")
+    workflow.add_edge("confirm_and_submit", END)
+
+    # 业务节点
     workflow.add_node("stock_error", stock_error)
     workflow.add_node("tier_suggest", tier_suggest)
     workflow.add_node("budget_check", budget_check)
