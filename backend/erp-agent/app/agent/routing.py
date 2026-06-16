@@ -53,10 +53,10 @@ def route_after_analysis(state: AgentState) -> str:
     - 默认 → call_model
     """
     analysis = state.get("analysis_result")
-    if isinstance(analysis, dict):
-        if analysis.get("has_tier_opportunity"):
+    if analysis is not None:
+        if analysis.has_tier_opportunity:
             return "tier_suggest"
-        if analysis.get("has_stock_risk"):
+        if analysis.has_stock_risk:
             return "show_alternatives"
 
     msgs = state.get("messages", [])

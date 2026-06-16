@@ -1,11 +1,14 @@
 import json
+import logging
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langgraph.types import Command, interrupt
 
 from app.agent.state import AgentState
 from app.mcp.erp_client import get as erp_get
 from app.mcp.server import override_purchase_order, transit_po_status
+
+logger = logging.getLogger(__name__)
 
 
 def _get_llm():
@@ -55,43 +58,47 @@ async def analyze_simulate(state: AgentState) -> dict:
     """LLM 分析试算结果，判断阶梯价、库存风险、供应商差异。"""
     msgs = state.get("messages", [])
     if not msgs:
+        logger.debug("analyze_simulate: 无消息，跳过")
         return {}
 
-    last_content = ""
+    simulate_data = None
     for msg in reversed(msgs):
-        content = getattr(msg, "content", "")
-        if isinstance(content, str) and content.strip().startswith("{"):
-            last_content = content
-            break
+        if isinstance(msg, ToolMessage):
+            try:
+                data = json.loads(msg.content)
+                if isinstance(data, dict) and data.get("all_quotes"):
+                    simulate_data = data
+                    break
+            except (json.JSONDecodeError, TypeError):
+                continue
 
-    if not last_content:
-        return {}
-
-    try:
-        data = json.loads(last_content)
-    except json.JSONDecodeError:
-        return {}
-
-    if not isinstance(data, dict) or not data.get("all_quotes"):
+    if not simulate_data:
+        logger.debug("analyze_simulate: 未找到试算结果 (all_quotes)，跳过")
         return {}
 
     llm = _get_llm()
     from app.agent.schemas import AnalysisResult
+    from app.agent.prompts import ANALYZE_PROMPT
 
-    structured_llm = llm.with_structured_output(AnalysisResult)
-    result: AnalysisResult = await structured_llm.ainvoke([
-        SystemMessage(content=(
-            "你是 ERP 采购分析师。分析试算结果，判断是否存在阶梯价机会和库存风险。\n"
-            f"试算结果: {json.dumps(data, ensure_ascii=False)[:2000]}"
-        )),
-        HumanMessage(content="请分析以上试算结果。"),
-    ])
+    prompt = ANALYZE_PROMPT.format(
+        simulate_result=json.dumps(simulate_data, ensure_ascii=False)
+    )
+
+    try:
+        structured_llm = llm.with_structured_output(AnalysisResult)
+        result: AnalysisResult = await structured_llm.ainvoke([
+            SystemMessage(content=prompt),
+            HumanMessage(content="请分析以上试算结果。"),
+        ])
+    except Exception:
+        logger.exception("analyze_simulate: LLM 调用失败，返回安全默认值")
+        return {
+            "analysis_result": AnalysisResult(),
+            "messages": [],
+        }
 
     return {
-        "analysis_result": {
-            "has_tier_opportunity": result.has_tier_opportunity,
-            "has_stock_risk": result.has_stock_risk,
-        },
+        "analysis_result": result,
         "messages": [],
     }
 

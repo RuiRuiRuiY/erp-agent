@@ -4,6 +4,8 @@ from typing import Annotated, TypedDict
 
 from langgraph.graph.message import add_messages
 
+from app.agent.schemas import AnalysisResult
+
 
 class CartItem(TypedDict):
     product_id: str
@@ -35,7 +37,7 @@ class AgentState(TypedDict):
     tier_suggestion: str | None
 
     user_intent: str | None
-    analysis_result: dict | None
+    analysis_result: AnalysisResult | None
     alternative_products: list | None
 
     error_context: dict | None

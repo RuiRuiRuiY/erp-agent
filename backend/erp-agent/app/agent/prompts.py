@@ -19,3 +19,10 @@ SYSTEM_PROMPT = """\
 当前进度: {po_status}
 已有信息: {context}
 """
+
+ANALYZE_PROMPT = """\
+你是 ERP 采购分析师。分析试算结果，判断是否存在阶梯价机会和库存风险。
+
+试算结果:
+{simulate_result}
+"""
