@@ -40,7 +40,6 @@ logger = logging.getLogger(__name__)
 # 如果未来改为 Gunicorn + 多 Worker 部署，每个 Worker 进程会有独立副本，
 # 这是正常行为（多连接 = 更高并发）。
 _checkpointer: MemorySaver | None = None
-_llm_instance: Any = None
 
 
 async def aget_checkpointer() -> MemorySaver:
@@ -71,22 +70,6 @@ async def aget_checkpointer() -> MemorySaver:
     return _checkpointer
 
 
-def _get_llm():
-    """获取或创建缓存的 LLM 实例。"""
-    global _llm_instance
-    if _llm_instance is not None:
-        return _llm_instance
-    from langchain_openai import ChatOpenAI
-
-    _llm_instance = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
-        temperature=0,
-        api_key=settings.OPENAI_API_KEY,
-        base_url=settings.OPENAI_BASE_URL,
-    )
-    return _llm_instance
-
-
 # ── 图构建 ──────────────────────────────────────────────────────────────
 
 
@@ -102,12 +85,12 @@ async def build_graph(tools: list, checkpointer: Any = None) -> Any:
 
     from langchain_core.messages import SystemMessage
     from app.agent.prompts import SYSTEM_PROMPT
+    from app.agent.llm import _get_llm
 
     workflow = StateGraph(AgentState)
 
     llm = _get_llm()
     llm_with_tools = llm.bind_tools(tools)
-    tools_desc = "\n".join(f"- {t.name}: {t.description}" for t in tools if t.description)
 
     async def _call_model(state: AgentState) -> dict:
         context_parts = []
@@ -120,7 +103,6 @@ async def build_graph(tools: list, checkpointer: Any = None) -> Any:
             context_parts.append(f"已选供应商: {state['selected_supplier_id']}")
 
         system = SYSTEM_PROMPT.format(
-            tools=tools_desc,
             po_status=state.get("po_status") or "新会话",
             context="; ".join(context_parts) or "新会话",
         )

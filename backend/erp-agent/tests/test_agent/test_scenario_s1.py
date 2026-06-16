@@ -39,7 +39,7 @@ async def test_s1_regular_purchase():
         AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n无阶梯价机会'),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
         initial = AgentState(messages=[HumanMessage(content="买5台显示器给IT部")])
         config = {"configurable": {"thread_id": "s1-int"}}

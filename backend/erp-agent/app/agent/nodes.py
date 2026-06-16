@@ -10,7 +10,7 @@ from app.mcp.server import override_purchase_order, transit_po_status
 
 def _get_llm():
     """获取缓存的 LLM 实例。"""
-    from app.agent.graph import _get_llm as _cached_llm
+    from app.agent.llm import _get_llm as _cached_llm
     return _cached_llm()
 
 
@@ -26,7 +26,6 @@ async def parse_input(state: AgentState) -> dict:
     from app.agent.prompts import SYSTEM_PROMPT
 
     system = SYSTEM_PROMPT.format(
-        tools="（工具调用由系统自动处理，你只需关注意图解析）",
         po_status=state.get("po_status") or "新会话",
         context="解析用户输入",
     )
@@ -121,7 +120,6 @@ async def analyze_simulate(state: AgentState) -> dict:
     from app.agent.prompts import SYSTEM_PROMPT
 
     system = SYSTEM_PROMPT.format(
-        tools="（分析试算结果）",
         po_status=state.get("po_status") or "试算完成",
         context=f"试算结果: {json.dumps(data, ensure_ascii=False)[:2000]}",
     )

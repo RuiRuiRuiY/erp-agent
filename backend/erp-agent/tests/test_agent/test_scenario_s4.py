@@ -48,7 +48,7 @@ async def test_s4_tiered_pricing():
             return pricelist
         return []
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm), \
+    with patch("app.agent.llm._get_llm", return_value=mock_llm), \
          patch("app.agent.nodes.erp_get", side_effect=mock_erp_get):
         graph = await build_graph(tools=tools)
         initial = AgentState(

@@ -71,7 +71,7 @@ async def test_hitl_interrupt_resume():
         }]),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="为研发部买10把椅子")],
@@ -116,7 +116,7 @@ async def test_hitl_override_full_flow():
         }]),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="为研发部买10把椅子")],
@@ -180,7 +180,7 @@ async def test_hitl_override_missing_params():
         }]),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
         config = {"configurable": {"thread_id": "test-hitl-missing-params"}}
 

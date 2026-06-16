@@ -52,7 +52,7 @@ async def test_s3_hitl_approval():
         }]),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="为研发部买10把椅子")],

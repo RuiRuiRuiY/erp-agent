@@ -41,7 +41,7 @@ async def test_s1_regular_purchase_e2e():
         AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n单供应商报价，无阶梯价机会，库存充足'),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
         initial = AgentState(messages=[HumanMessage(content="买5台显示器给IT部")])
         config = {"configurable": {"thread_id": "e2e-s1"}}
@@ -79,7 +79,7 @@ async def test_s2_insufficient_stock_e2e():
         }]),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="买10把椅子")],
@@ -122,7 +122,7 @@ async def test_s3_hitl_approval_e2e():
         }]),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="为研发部买10把椅子")],
@@ -201,7 +201,7 @@ async def test_s4_tiered_pricing_e2e():
             ]
         return []
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm), \
+    with patch("app.agent.llm._get_llm", return_value=mock_llm), \
          patch("app.agent.nodes.erp_get", side_effect=mock_erp_get):
         graph = await build_graph(tools=tools)
         initial = AgentState(
@@ -251,7 +251,7 @@ async def test_s5_multi_supplier_e2e():
         AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n多供应商报价，各有优势：SUP_A价格低，SUP_C交期快评分高'),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="买5个键盘")],
@@ -282,7 +282,7 @@ async def test_s6_fuzzy_input_preserves_state():
         AIMessage(content="继续当前采购流程"),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="就按这个来")],
@@ -321,7 +321,7 @@ async def test_s7_reset_creates_new_thread_state():
         AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n显示器报价正常'),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
 
         # 模拟旧会话

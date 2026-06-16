@@ -43,7 +43,7 @@ async def test_s5_multi_supplier():
         AIMessage(content='{"has_tier_opportunity": false, "has_stock_risk": false}\n多供应商报价，各有优势'),
     ])
 
-    with patch("app.agent.graph._get_llm", return_value=mock_llm):
+    with patch("app.agent.llm._get_llm", return_value=mock_llm):
         graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="买5个键盘")],
