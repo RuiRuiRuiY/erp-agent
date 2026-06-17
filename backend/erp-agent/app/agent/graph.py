@@ -7,10 +7,13 @@ build_graph(tools) — 构建生产模式图：LLM + ToolNode + 业务节点 + �
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
+from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.agent.nodes import (
@@ -28,6 +31,7 @@ from app.agent.nodes import (
     transit_to_pending,
     user_resolve,
 )
+from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.routing import route_after_analysis, route_after_tools, route_after_user_choice
 from app.agent.state import AgentState
 from app.core.config import settings
@@ -70,10 +74,33 @@ async def aget_checkpointer() -> MemorySaver:
     return _checkpointer
 
 
+# ── LLM 节点 ────────────────────────────────────────────────────────────
+
+
+async def _call_model(state: AgentState, *, llm_with_tools: Any) -> dict:
+    """LLM 调用节点：组装 system prompt，调用绑定工具的 LLM。"""
+    context_parts = []
+    if state.get("department_id"):
+        context_parts.append(f"部门: {state['department_id']}")
+    if state.get("cart_items"):
+        names = [i.get("product_name", "") for i in state["cart_items"]]
+        context_parts.append(f"商品: {', '.join(names)}")
+    if state.get("selected_supplier_id"):
+        context_parts.append(f"已选供应商: {state['selected_supplier_id']}")
+
+    system = SYSTEM_PROMPT.format(
+        po_status=state.get("po_status") or "新会话",
+        context="; ".join(context_parts) or "新会话",
+    )
+    messages = [SystemMessage(content=system), *state["messages"]]
+    response = await llm_with_tools.ainvoke(messages)
+    return {"messages": [response]}
+
+
 # ── 图构建 ──────────────────────────────────────────────────────────────
 
 
-async def build_graph(tools: list, checkpointer: Any = None) -> Any:
+async def build_graph(tools: list, checkpointer: Any = None) -> CompiledStateGraph:
     """构建并编译 LangGraph（生产模式）。
 
     Args:
@@ -83,8 +110,6 @@ async def build_graph(tools: list, checkpointer: Any = None) -> Any:
     if checkpointer is None:
         checkpointer = await aget_checkpointer()
 
-    from langchain_core.messages import SystemMessage
-    from app.agent.prompts import SYSTEM_PROMPT
     from app.agent.llm import _get_llm
 
     workflow = StateGraph(AgentState)
@@ -92,29 +117,11 @@ async def build_graph(tools: list, checkpointer: Any = None) -> Any:
     llm = _get_llm()
     llm_with_tools = llm.bind_tools(tools)
 
-    async def _call_model(state: AgentState) -> dict:
-        context_parts = []
-        if state.get("department_id"):
-            context_parts.append(f"部门: {state['department_id']}")
-        if state.get("cart_items"):
-            names = [i.get("product_name", "") for i in state["cart_items"]]
-            context_parts.append(f"商品: {', '.join(names)}")
-        if state.get("selected_supplier_id"):
-            context_parts.append(f"已选供应商: {state['selected_supplier_id']}")
-
-        system = SYSTEM_PROMPT.format(
-            po_status=state.get("po_status") or "新会话",
-            context="; ".join(context_parts) or "新会话",
-        )
-        messages = [SystemMessage(content=system), *state["messages"]]
-        response = await llm_with_tools.ainvoke(messages)
-        return {"messages": [response]}
-
-    tool_node = ToolNode(tools)
+    tool_node = ToolNode(tools, handle_tool_errors=True)
 
     # 入口：parse_input → call_model → ToolNode
     workflow.add_node("parse_input", parse_input)
-    workflow.add_node("call_model", _call_model)
+    workflow.add_node("call_model", partial(_call_model, llm_with_tools=llm_with_tools))
     workflow.add_node("tools", tool_node)
 
     workflow.add_edge(START, "parse_input")
@@ -202,30 +209,3 @@ async def build_graph(tools: list, checkpointer: Any = None) -> Any:
     workflow.add_edge("resume_cleanup", "__end__")
 
     return workflow.compile(checkpointer=checkpointer, interrupt_before=["hitl_gate"])
-
-
-# ── Langfuse 辅助 ──────────────────────────────────────────────────────
-
-
-def get_langfuse_callback():
-    """获取 Langfuse CallbackHandler，未配置时返回 None。"""
-    if not (settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY):
-        return None
-    try:
-        from app.core.langfuse import setup_langfuse, langfuse_client as lf
-        setup_langfuse()
-        if not lf:
-            return None
-        from langfuse.langchain import CallbackHandler
-        return CallbackHandler()
-    except Exception:
-        return None
-
-
-def make_langfuse_config(callback=None):
-    """构建包含 Langfuse 回调的 config dict。"""
-    if callback is None:
-        callback = get_langfuse_callback()
-    if callback is None:
-        return {}
-    return {"callbacks": [callback]}

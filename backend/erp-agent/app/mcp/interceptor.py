@@ -116,6 +116,15 @@ def catch_erp_error(func):
                 "user_message": "无法连接到 ERP 系统，请检查网络后重试。",
                 "message": e.message,
             }, ensure_ascii=False)
+        except Exception as e:
+            return json.dumps({
+                "_error": True,
+                "error_type": "unexpected",
+                "error_code": "UNEXPECTED_ERROR",
+                "action": "inform_user",
+                "user_message": f"系统异常：{type(e).__name__}",
+                "message": str(e),
+            }, ensure_ascii=False)
     return wrapper
 
 

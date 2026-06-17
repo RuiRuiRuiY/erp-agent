@@ -14,11 +14,22 @@ import chainlit as cl
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
-from app.agent.graph import build_graph, make_langfuse_config
+from app.agent.graph import build_graph
+from app.core.langfuse import make_langfuse_config
 
 logger = logging.getLogger(__name__)
 
 _graph = None
+_RECURSION_LIMIT = 25
+
+
+def _build_config(thread_id: str) -> dict:
+    """构建 graph.ainvoke 的 config dict，统一 recursion_limit 和 Langfuse 回调。"""
+    return {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": _RECURSION_LIMIT,
+        **make_langfuse_config(),
+    }
 
 
 async def _get_graph():
@@ -87,10 +98,7 @@ async def on_message(message: cl.Message):
         cl.user_session.set("thread_id", thread_id)
 
     graph = await _get_graph()
-    config = {
-        "configurable": {"thread_id": thread_id},
-        **make_langfuse_config(),
-    }
+    config = _build_config(thread_id)
 
     operator_role = cl.user_session.get("operator_role", "purchaser")
 
@@ -152,10 +160,7 @@ async def on_approve(action: cl.Action):
     """用户点击「批准」：resume 图执行。"""
     thread_id = cl.user_session.get("thread_id")
     graph = await _get_graph()
-    config = {
-        "configurable": {"thread_id": thread_id},
-        **make_langfuse_config(),
-    }
+    config = _build_config(thread_id)
 
     try:
         result = await graph.ainvoke(Command(resume=True), config)
@@ -179,10 +184,7 @@ async def on_reject(action: cl.Action):
     """用户点击「拒绝」：resume 图但传入拒绝信号。"""
     thread_id = cl.user_session.get("thread_id")
     graph = await _get_graph()
-    config = {
-        "configurable": {"thread_id": thread_id},
-        **make_langfuse_config(),
-    }
+    config = _build_config(thread_id)
 
     try:
         result = await graph.ainvoke(Command(resume=False), config)
