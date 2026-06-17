@@ -183,16 +183,14 @@ async def test_s4_tiered_pricing_e2e():
         AnalysisResult(has_tier_opportunity=True, has_stock_risk=False),
     ])
 
-    async def mock_erp_get(path, params=None):
-        if "/pricelists" in path:
-            return [
-                {"min_qty": 1, "unit_price": 100.0},
-                {"min_qty": 100, "unit_price": 80.0},
-            ]
-        return []
+    async def mock_pricelist(supplier_id: str, product_id: str = ""):
+        return json.dumps([
+            {"min_qty": 1, "unit_price": 100.0},
+            {"min_qty": 100, "unit_price": 80.0},
+        ])
 
     with patch("app.agent.llm._get_llm", return_value=mock_llm), \
-         patch("app.agent.nodes.erp_get", side_effect=mock_erp_get):
+         patch("app.agent.nodes.get_supplier_pricelist", side_effect=mock_pricelist):
         graph = await build_graph(tools=tools)
         initial = AgentState(
             messages=[HumanMessage(content="买80个鼠标给IT部")],

@@ -1,20 +1,60 @@
+import asyncio
 import json
 import logging
 
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from langgraph.types import Command, interrupt
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langgraph.types import interrupt
 
+from app.agent.llm import _get_llm
 from app.agent.state import AgentState
-from app.mcp.erp_client import get as erp_get
-from app.mcp.server import override_purchase_order, transit_po_status
+from app.mcp.server import (
+    draft_purchase_order,
+    get_supplier_pricelist,
+    override_purchase_order,
+    search_product,
+    transit_po_status,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _get_llm():
-    """获取缓存的 LLM 实例。"""
-    from app.agent.llm import _get_llm as _cached_llm
-    return _cached_llm()
+def _find_simulate_data(msgs: list) -> dict | None:
+    """从消息列表中反向查找 simulate_purchase 返回的 all_quotes 数据。"""
+    for msg in reversed(msgs):
+        content = getattr(msg, "content", "")
+        if isinstance(content, str) and content.strip().startswith("{"):
+            try:
+                data = json.loads(content)
+                if isinstance(data, dict) and data.get("all_quotes"):
+                    return data
+            except (json.JSONDecodeError, TypeError):
+                continue
+    return None
+
+
+def _extract_user_error(data: dict) -> str:
+    """从 MCP 错误响应中提取用户可读的错误消息。"""
+    return data.get("user_message", data.get("message", ""))
+
+
+def _build_po_items(cart_items: list[dict]) -> list[dict]:
+    """从 cart_items 中提取 PO 所需的 items 列表。"""
+    return [{"product_id": item["product_id"], "quantity": item["quantity"]} for item in cart_items]
+
+
+def _format_po_result(data: dict, supplier_id: str, *, prefix: str = "") -> dict:
+    """格式化 PO 创建结果（成功或失败）。"""
+    if data.get("_error"):
+        return {"messages": [AIMessage(content=f"{prefix}建单失败：{_extract_user_error(data)}")]}
+    return {
+        "po_draft_id": data["id"],
+        "po_status": data["status"],
+        "po_supplier_id": supplier_id,
+        "messages": [AIMessage(content=(
+            f"{prefix}采购单已创建：{data['po_number']}，"
+            f"金额 ¥{data['total_amount']:.2f}，状态 {data['status']}"
+        ))],
+    }
 
 
 async def parse_input(state: AgentState) -> dict:
@@ -61,24 +101,14 @@ async def analyze_simulate(state: AgentState) -> dict:
         logger.debug("analyze_simulate: 无消息，跳过")
         return {}
 
-    simulate_data = None
-    for msg in reversed(msgs):
-        if isinstance(msg, ToolMessage):
-            try:
-                data = json.loads(msg.content)
-                if isinstance(data, dict) and data.get("all_quotes"):
-                    simulate_data = data
-                    break
-            except (json.JSONDecodeError, TypeError):
-                continue
-
+    simulate_data = _find_simulate_data(msgs)
     if not simulate_data:
         logger.debug("analyze_simulate: 未找到试算结果 (all_quotes)，跳过")
         return {}
 
     llm = _get_llm()
-    from app.agent.schemas import AnalysisResult
     from app.agent.prompts import ANALYZE_PROMPT
+    from app.agent.schemas import AnalysisResult
 
     prompt = ANALYZE_PROMPT.format(
         simulate_result=json.dumps(simulate_data, ensure_ascii=False)
@@ -106,20 +136,10 @@ async def analyze_simulate(state: AgentState) -> dict:
 async def present_options(state: AgentState) -> dict:
     """格式化展示供应商选项，等待用户选择。"""
     msgs = state.get("messages", [])
-    last_data = None
-
-    for msg in reversed(msgs):
-        content = getattr(msg, "content", "")
-        if isinstance(content, str) and content.strip().startswith("{"):
-            try:
-                data = json.loads(content)
-                if isinstance(data, dict) and data.get("all_quotes"):
-                    last_data = data
-                    break
-            except json.JSONDecodeError:
-                continue
+    last_data = _find_simulate_data(msgs)
 
     if not last_data:
+        logger.debug("present_options: 未找到试算结果，跳过")
         return {}
 
     lines = ["供应商选项：\n"]
@@ -142,7 +162,7 @@ async def present_options(state: AgentState) -> dict:
 
     return {
         "supplier_choice_prompted": True,
-        "messages": [{"role": "assistant", "content": "\n".join(lines)}],
+        "messages": [AIMessage(content="\n".join(lines))],
     }
 
 
@@ -154,19 +174,21 @@ async def show_alternatives(state: AgentState) -> dict:
     available = ctx.get("available", 0)
 
     try:
-        products = await erp_get("/products", params={"keyword": product_id})
+        raw = await search_product(q=product_id)
+        data = json.loads(raw)
+        products = data if isinstance(data, list) else []
     except Exception:
+        logger.debug("show_alternatives: 商品搜索失败，product_id=%s", product_id)
         products = []
 
     alternatives = []
-    if isinstance(products, list):
-        for p in products[:3]:
-            if p.get("id") != product_id and p.get("stock_quantity", 0) > 0:
-                alternatives.append({
-                    "product_id": p["id"],
-                    "product_name": p.get("name", ""),
-                    "stock": p.get("stock_quantity", 0),
-                })
+    for p in products[:3]:
+        if p.get("id") != product_id and p.get("stock_quantity", 0) > 0:
+            alternatives.append({
+                "product_id": p["id"],
+                "product_name": p.get("name", ""),
+                "stock": p.get("stock_quantity", 0),
+            })
 
     if alternatives:
         lines = ["替代商品方案：\n"]
@@ -182,7 +204,7 @@ async def show_alternatives(state: AgentState) -> dict:
 
     return {
         "alternative_products": alternatives,
-        "messages": [{"role": "assistant", "content": msg}],
+        "messages": [AIMessage(content=msg)],
     }
 
 
@@ -208,44 +230,21 @@ async def confirm_and_submit(state: AgentState) -> dict:
 
     if not all([dept_id, supplier_id, cart_items]):
         return {
-            "messages": [{
-                "role": "assistant",
-                "content": "缺少必要参数（部门/供应商/商品），无法创建采购单。",
-            }],
+            "messages": [AIMessage(content="缺少必要参数（部门/供应商/商品），无法创建采购单。")],
         }
 
-    items = [
-        {"product_id": item["product_id"], "quantity": item["quantity"]}
-        for item in cart_items
-    ]
-
-    from app.mcp.server import draft_purchase_order
+    items = _build_po_items(cart_items)
+    reasoning = (
+        f"常规采购: department={dept_id}, supplier={supplier_id}, "
+        f"items={json.dumps(items, ensure_ascii=False)}"
+    )
     raw = await draft_purchase_order(
         department_id=dept_id,
         supplier_id=supplier_id,
         items=items,
+        agent_reasoning=reasoning,
     )
-    data = json.loads(raw)
-
-    if data.get("_error"):
-        return {
-            "messages": [{
-                "role": "assistant",
-                "content": f"建单失败：{data.get('user_message', data.get('message', ''))}",
-            }],
-        }
-
-    po_id = data["id"]
-    msg = (
-        f"采购单已创建：{data['po_number']}，金额 ¥{data['total_amount']:.2f}，状态 {data['status']}"
-    )
-
-    return {
-        "po_draft_id": po_id,
-        "po_status": data["status"],
-        "po_supplier_id": supplier_id,
-        "messages": [{"role": "assistant", "content": msg}],
-    }
+    return _format_po_result(json.loads(raw), supplier_id)
 
 
 def _extract_error_context(state: AgentState) -> dict:
@@ -270,7 +269,6 @@ def _extract_error_context(state: AgentState) -> dict:
 def stock_error(state: AgentState) -> dict:
     """处理 INSUFFICIENT_STOCK 错误，生成替代方案。"""
     ctx = _extract_error_context(state)
-    product_id = ctx.get("product_id", "")
     requested = ctx.get("requested", 0)
     available = ctx.get("available", 0)
 
@@ -287,7 +285,7 @@ def stock_error(state: AgentState) -> dict:
         "error_context": None,
         "recovery_attempted": True,
         "recovery_path": "reduce_qty" if requested > available else "change_product",
-        "messages": [{"role": "assistant", "content": msg}],
+        "messages": [AIMessage(content=msg)],
     }
 
 
@@ -297,26 +295,18 @@ async def tier_suggest(state: AgentState) -> dict:
     if not msgs:
         return {}
 
-    simulate_data = None
-    for msg in reversed(msgs):
-        content = getattr(msg, "content", "")
-        if isinstance(content, str) and content.strip().startswith("{"):
-            try:
-                data = json.loads(content)
-                if isinstance(data, dict) and data.get("all_quotes"):
-                    simulate_data = data
-                    break
-            except json.JSONDecodeError:
-                continue
-
+    simulate_data = _find_simulate_data(msgs)
     if not simulate_data:
+        logger.debug("tier_suggest: 未找到试算结果，跳过")
         return {}
 
     all_quotes = simulate_data.get("all_quotes")
     if not all_quotes:
         return {}
 
-    suggestions = []
+    # 收集所有需要查询的 (supplier_id, product_id) 对
+    tasks = []
+    task_meta = []
     seen = set()
 
     for quote in all_quotes:
@@ -328,36 +318,53 @@ async def tier_suggest(state: AgentState) -> dict:
             qty = detail.get("quantity", 0)
             unit_price = detail.get("unit_price", 0)
 
-            if not pid or pid in seen or qty <= 0 or unit_price <= 0:
+            if not pid or (sid, pid) in seen or qty <= 0 or unit_price <= 0:
                 continue
-            seen.add(pid)
+            seen.add((sid, pid))
 
-            try:
-                pricelist = await erp_get(f"/suppliers/{sid}/pricelists", params={"product_id": pid})
-            except Exception:
+            tasks.append(get_supplier_pricelist(supplier_id=sid, product_id=pid))
+            task_meta.append((sname, pname, qty, unit_price))
+
+    if not tasks:
+        return {}
+
+    # 并发执行所有 pricelist 查询
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    suggestions = []
+    for (sname, pname, qty, unit_price), raw in zip(task_meta, results, strict=True):
+        if isinstance(raw, Exception):
+            continue
+
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict) and data.get("_error"):
                 continue
+            pricelist = data if isinstance(data, list) else []
+        except (json.JSONDecodeError, TypeError):
+            continue
 
-            if not isinstance(pricelist, list):
-                continue
+        if not isinstance(pricelist, list):
+            continue
 
-            tiers = sorted(pricelist, key=lambda t: t.get("min_qty", 0))
-            for tier in tiers:
-                tier_min = tier.get("min_qty", 0)
-                tier_price = tier.get("unit_price", 0)
-                if tier_min > qty and tier_price > 0 and tier_price < unit_price:
-                    add_qty = tier_min - qty
-                    savings = round((unit_price - tier_price) * tier_min, 2)
-                    suggestions.append({
-                        "supplier": sname,
-                        "product": pname,
-                        "current_qty": qty,
-                        "current_price": unit_price,
-                        "suggested_qty": tier_min,
-                        "suggested_price": tier_price,
-                        "extra_qty": add_qty,
-                        "savings": savings,
-                    })
-                    break
+        tiers = sorted(pricelist, key=lambda t: t.get("min_qty", 0))
+        for tier in tiers:
+            tier_min = tier.get("min_qty", 0)
+            tier_price = tier.get("unit_price", 0)
+            if tier_min > qty and tier_price > 0 and tier_price < unit_price:
+                add_qty = tier_min - qty
+                savings = round((unit_price - tier_price) * tier_min, 2)
+                suggestions.append({
+                    "supplier": sname,
+                    "product": pname,
+                    "current_qty": qty,
+                    "current_price": unit_price,
+                    "suggested_qty": tier_min,
+                    "suggested_price": tier_price,
+                    "extra_qty": add_qty,
+                    "savings": savings,
+                })
+                break
 
     if not suggestions:
         return {}
@@ -374,8 +381,24 @@ async def tier_suggest(state: AgentState) -> dict:
     msg = "\n".join(lines)
     return {
         "tier_suggestion": msg,
-        "messages": [{"role": "assistant", "content": msg}],
+        "messages": [AIMessage(content=msg)],
     }
+
+
+def _budget_insufficient_msg(
+    *, required: float = 0, remaining: float = 0, deficit: float = 0,
+    available: float = 0, department_id: str = "", fiscal_year: str = "",
+) -> str:
+    if deficit > 0:
+        return (
+            f"预算不足：采购需 ¥{required:.2f}，部门仅剩 ¥{remaining:.2f}，"
+            f"缺口 ¥{deficit:.2f}。\n需要财务主管审批（override_token）后才能继续。"
+        )
+    return (
+        f"预算警告：部门 [{department_id}] 财年 [{fiscal_year}] "
+        f"可用预算为 ¥{available:.2f}，已出现透支。\n"
+        f"需要财务主管审批（override_token）后才能继续。"
+    )
 
 
 def budget_check(state: AgentState) -> dict:
@@ -403,40 +426,31 @@ def budget_check(state: AgentState) -> dict:
         return {}
 
     # 场景 A: draft_purchase_order 返回 BUDGET_INSUFFICIENT
-    # catch_erp_error 已把 context 金额从分转为元，直接使用
     if data.get("_error") and data.get("error_code") == "BUDGET_INSUFFICIENT":
         ctx = data.get("context", {})
-        required = ctx.get("required", 0) or 0
-        remaining = ctx.get("remaining", 0) or 0
-        deficit = ctx.get("deficit", 0) or 0
-        msg = (
-            f"预算不足：采购需 ¥{required:.2f}，部门仅剩 ¥{remaining:.2f}，"
-            f"缺口 ¥{deficit:.2f}。\n"
-            f"需要财务主管审批（override_token）后才能继续。"
+        msg = _budget_insufficient_msg(
+            required=ctx.get("required", 0) or 0,
+            remaining=ctx.get("remaining", 0) or 0,
+            deficit=ctx.get("deficit", 0) or 0,
         )
         return {
             "pending_approval_type": "budget",
-            "messages": [{"role": "assistant", "content": msg}],
+            "messages": [AIMessage(content=msg)],
         }
 
     # 场景 B: check_budget 返回 available < 0
-    if "available" in data:
-        available = data.get("available", 0)
-        if available >= 0:
-            return {}
-
-        department_id = data.get("department_id", "")
-        fiscal_year = data.get("fiscal_year", "")
-        msg = (
-            f"预算警告：部门 [{department_id}] 财年 [{fiscal_year}] "
-            f"可用预算为 ¥{available:.2f}，已出现透支。\n"
-            f"需要财务主管审批（override_token）后才能继续。"
+    if "available" in data and data["available"] < 0:
+        msg = _budget_insufficient_msg(
+            available=data["available"],
+            department_id=data.get("department_id", ""),
+            fiscal_year=data.get("fiscal_year", ""),
         )
         return {
             "pending_approval_type": "budget",
-            "messages": [{"role": "assistant", "content": msg}],
+            "messages": [AIMessage(content=msg)],
         }
 
+    logger.debug("budget_check: 未匹配预算不足条件，跳过")
     return {}
 
 
@@ -461,9 +475,10 @@ def hitl_gate(state: AgentState) -> dict:
             "override_token": None,
             "pending_approval_type": None,
             "action_source": "human",
-            "messages": [{"role": "assistant", "content": "采购已取消。"}],
+            "messages": [AIMessage(content="采购已取消。")],
         }
 
+    # Chainlit 前端 resume 时可能传入 {override_token: "..."} 格式的 dict
     if isinstance(token, dict):
         token = token.get("override_token", token)
 
@@ -483,21 +498,16 @@ async def override_po(state: AgentState) -> dict:
 
     if not all([override_token, dept_id, supplier_id, cart_items]):
         return {
-            "messages": [{
-                "role": "assistant",
-                "content": "缺少必要参数（部门/供应商/商品/override_token），无法执行特批建单。",
-            }],
+            "messages": [AIMessage(
+                content="缺少必要参数（部门/供应商/商品/override_token），无法执行特批建单。"
+            )],
         }
 
-    items = [
-        {"product_id": item["product_id"], "quantity": item["quantity"]}
-        for item in cart_items
-    ]
+    items = _build_po_items(cart_items)
     reasoning = (
         f"特批采购: department={dept_id}, supplier={supplier_id}, "
         f"items={json.dumps(items, ensure_ascii=False)}"
     )
-
     raw = await override_purchase_order(
         department_id=dept_id,
         supplier_id=supplier_id,
@@ -505,27 +515,7 @@ async def override_po(state: AgentState) -> dict:
         override_token=override_token,
         agent_reasoning=reasoning,
     )
-    data = json.loads(raw)
-
-    if data.get("_error"):
-        return {
-            "messages": [{
-                "role": "assistant",
-                "content": f"特批建单失败：{data.get('user_message', data.get('message', ''))}",
-            }],
-        }
-
-    po_id = data["id"]
-    msg = (
-        f"特批采购单已创建：{data['po_number']}，金额 ¥{data['total_amount']:.2f}，状态 {data['status']}"
-    )
-
-    return {
-        "po_draft_id": po_id,
-        "po_status": data["status"],
-        "po_supplier_id": supplier_id,
-        "messages": [{"role": "assistant", "content": msg}],
-    }
+    return _format_po_result(json.loads(raw), supplier_id, prefix="特批")
 
 
 async def transit_to_pending(state: AgentState) -> dict:
@@ -537,10 +527,7 @@ async def transit_to_pending(state: AgentState) -> dict:
     po_id = state.get("po_draft_id")
     if not po_id:
         return {
-            "messages": [{
-                "role": "assistant",
-                "content": "缺少 PO ID，无法提交审批。",
-            }],
+            "messages": [AIMessage(content="缺少 PO ID，无法提交审批。")],
         }
 
     role = state.get("operator_role") or "purchaser"
@@ -549,21 +536,15 @@ async def transit_to_pending(state: AgentState) -> dict:
 
     if data.get("_error"):
         return {
-            "messages": [{
-                "role": "assistant",
-                "content": f"提交审批失败：{data.get('user_message', data.get('message', ''))}",
-            }],
+            "messages": [AIMessage(content=f"提交审批失败：{_extract_user_error(data)}")],
         }
 
     return {
         "po_status": "PENDING",
-        "messages": [{
-            "role": "assistant",
-            "content": (
-                f"采购单已提交审批，单号: {data['po_number']}。\n"
-                f"当前状态: 待审批。财务主管审批通过后即可下单。"
-            ),
-        }],
+        "messages": [AIMessage(content=(
+            f"采购单已提交审批，单号: {data['po_number']}。\n"
+            f"当前状态: 待审批。财务主管审批通过后即可下单。"
+        ))],
     }
 
 
@@ -598,5 +579,5 @@ def resume_cleanup(state: AgentState) -> dict:
         "recovery_path": None,
         "tier_suggestion": None,
         "pending_approval_type": None,
-        "messages": [{"role": "assistant", "content": msg}],
+        "messages": [AIMessage(content=msg)],
     }
